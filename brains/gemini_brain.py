@@ -20,7 +20,7 @@ JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 class GeminiBrain:
     """Calls Gemini with a camera frame and instruction, returning a Decision."""
 
-    def __init__(self, model: str = "gemini-2.5-flash") -> None:
+    def __init__(self, model: str = "gemini-robotics-er-1.6-preview") -> None:
         api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         if not api_key:
             raise RuntimeError("Set GEMINI_API_KEY or GOOGLE_API_KEY before using --brain gemini.")
@@ -50,7 +50,7 @@ class GeminiBrain:
             model=self._model,
             contents=[prompt, image_part],
             config=self._types.GenerateContentConfig(
-                response_mime_type="application/json",
+                thinking_config=self._types.ThinkingConfig(thinking_level="LOW"),
                 temperature=0.1,
             ),
         )

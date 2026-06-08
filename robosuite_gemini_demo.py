@@ -15,6 +15,9 @@ import time
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import cv2
 import mujoco
 import numpy as np
@@ -381,7 +384,7 @@ def run_demo(args: argparse.Namespace) -> int:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--brain", choices=["mock", "gemini"], default="mock")
-    parser.add_argument("--gemini-model", default="gemini-2.5-flash")
+    parser.add_argument("--gemini-model", default="gemini-robotics-er-1.6-preview")
     parser.add_argument(
         "--instruction",
         default="Pick up all defective parts and put them in the reject bin.",
