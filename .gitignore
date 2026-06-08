@@ -1,0 +1,19 @@
+# Python
+.venv/
+.venv312/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Runtime output
+output/
+runs/
+*.log
+
+# Secrets
+.env
+
+# OS
+.DS_Store
+Thumbs.db
