@@ -1,0 +1,15 @@
+<mujoco model="g1_29dof stage scene">
+  <!-- g1_29dof.xml is already a complete scene (floor, skybox, light). Only add the stage. -->
+  <include file="g1_29dof.xml"/>
+
+  <asset>
+    <material name="stage_mat" rgba="0.85 0.2 0.2 0.9"/>
+  </asset>
+
+  <worldbody>
+    <!-- Stage center marker at (2.5, 0): a thin red disk the camera + overlay can see. -->
+    <geom name="stage_center" type="cylinder" pos="2.5 0 0.005" size="0.45 0.005"
+          material="stage_mat" contype="0" conaffinity="0"/>
+    <site name="stage_center_site" pos="2.5 0 0.02" size="0.05" rgba="1 1 0 1"/>
+  </worldbody>
+</mujoco>
