@@ -69,6 +69,11 @@ class VisionBrain:
             return er
         return self._look_local(rgb)
 
+    def quick_look(self, rgb: np.ndarray) -> dict:
+        """Free, unlimited LOCAL caption (no API call) for the live HUD — keeps the SEES text
+        tracking the camera between explicit ER look commands without burning vision quota."""
+        return self._look_local(rgb)
+
     def _look_er(self, rgb: np.ndarray) -> dict | None:
         bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
         ok, buf = cv2.imencode(".jpg", bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 85])

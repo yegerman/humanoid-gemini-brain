@@ -59,6 +59,16 @@ Rules enforced (`planner.SYSTEM` + `_to_goal`):
 - Navigation targets a **known** label or the stage landmark; never fabricate coordinates.
 - A named-but-unseen target becomes a **visual search** (`go_to_visual`), not a guessed position.
 
+**Planner-triggered look (grounded re-plan):** if a command plans to a `go_to_visual` for a
+target the robot has *not* seen, the run loop first takes a fresh ER look (`_do_look`), learns
+any detections into memory, then **re-plans** — so it can walk straight to the now-known
+position instead of blindly searching. ER is still invoked only when seeing actually matters.
+
+**Live HUD caption:** the `SEES` text is kept matching the live camera by a free, unlimited
+local-CV refresh (`Executor.ambient_caption` → `VisionBrain.quick_look`) each render tick. A
+rich ER caption (from an explicit "what do you see") is held for ~4 s before the ambient
+refresh resumes, so the user can read it. ER quota is never spent on the ambient refresh.
+
 ## Detection → world position
 
 `Executor._estimate_target(proprio, det)` turns one detection into a world `(x,y)`: horizontal

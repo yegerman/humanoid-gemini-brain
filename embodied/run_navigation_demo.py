@@ -119,12 +119,29 @@ class Executor:
         if r:
             self.scene.caption = r.get("caption", "(no caption)")
             self._learn(r)
+            # If this was a rich ER caption, hold it on the HUD a few seconds before the free
+            # local-CV ambient refresh takes over, so the user can read it.
+            if str(r.get("model_used", "")).startswith("gemini"):
+                self._hold_caption_until = self.c.counter + int(4.0 / self.c.sim_dt)
             self.plan.current = "I see: " + self.scene.caption[:60]
         else:
             self.scene.caption = "(vision unavailable - quota?)"
             self.plan.current = "vision unavailable"
         print("  vision:", self.scene.caption)
         return self.plan.current
+
+    def ambient_caption(self, ego) -> None:
+        """Keep the HUD SEES text matching the live camera, for free (local CV, no API).
+        Skips while a rich ER caption is still being held, and during active vision goals."""
+        if self.c.counter < getattr(self, "_hold_caption_until", 0):
+            return
+        if self.goal.kind in ("go_to_visual", "look_at"):
+            return  # these actively manage the camera/steering themselves
+        if self.vision is None:
+            return
+        r = self.vision.quick_look(ego)
+        if r and r.get("caption"):
+            self.scene.caption = r["caption"]
 
     def _learn(self, r: dict) -> None:
         """Record every detected object into spatial memory + scene.targets (label -> world xy)."""
@@ -305,6 +322,14 @@ def run_interactive(seconds: float, width: int = 1280, height: int = 720) -> int
             cmd = chat.poll()
             if cmd:
                 goal, plan = brain.plan(cmd, scene, memory)
+                # Grounded re-plan: if the plan needs to find an object the robot hasn't seen,
+                # take a FRESH look first (ER), learn it into memory, then plan again so it can
+                # walk to the now-known position instead of blindly searching.
+                if goal.kind == "go_to_visual" and goal.target_name \
+                        and memory.recall(goal.target_name) is None:
+                    print(f"  [planner] haven't seen '{goal.target_name}' — taking a fresh look first")
+                    ex._do_look()
+                    goal, plan = brain.plan(cmd, scene, memory)
                 ex.set(goal, plan)
                 print(f"  brain: {goal.kind} {goal.target_xy or goal.skill} | {plan.reasoning}")
             ex.tick()
@@ -315,6 +340,7 @@ def run_interactive(seconds: float, width: int = 1280, height: int = 720) -> int
                               height=p.height, upright=p.upright)
                 bus.publish("/feedback", fb)
                 ego = percept.render_ego()          # robot's-eye view
+                ex.ambient_caption(ego)             # keep SEES text matching the live camera (free)
                 frame = overlay.draw(ego, ex.goal, scene, ex.plan, fb)
                 cv2.imshow(hud, frame)
                 key = cv2.waitKey(1) & 0xFF

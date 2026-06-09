@@ -45,6 +45,10 @@ The planner only acts on what the robot actually knows. Every command is planned
 
 Unseen targets trigger a *search*, not a made-up coordinate. See `DESIGN.md` for the closed loop.
 
+The `SEES` caption on the HUD tracks the live camera (a free local refresh each frame); a rich
+Gemini-ER caption from "what do you see" is held briefly so you can read it. And if you ask to
+go to something the robot hasn't seen, it takes a fresh look first, then plans to walk there.
+
 ## Where the compute runs (GPU split)
 
 - **RL locomotion policy** → `torch` (CPU build) on the **CPU**. Small network, no CUDA needed.
