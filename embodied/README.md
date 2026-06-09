@@ -45,9 +45,14 @@ The planner only acts on what the robot actually knows. Every command is planned
 
 Unseen targets trigger a *search*, not a made-up coordinate. See `DESIGN.md` for the closed loop.
 
-The `SEES` caption on the HUD tracks the live camera (a free local refresh each frame); a rich
-Gemini-ER caption from "what do you see" is held briefly so you can read it. And if you ask to
-go to something the robot hasn't seen, it takes a fresh look first, then plans to walk there.
+**Continuous perception:** every frame the robot updates the `SEES` caption AND feeds what it
+sees into spatial memory — for free (local OpenCV, no API). A rich Gemini-ER caption from
+"what do you see" is held briefly so you can read it. If you ask to go to something it hasn't
+seen, it takes a fresh look first, then plans to walk there.
+
+For automatic *rich* (multi-object) perception on a timer, add `--look-secs N` (e.g. `30`). This
+spends Gemini-ER quota every N seconds, so it's **off by default** (the free continuous local
+perception above always runs regardless).
 
 ## Where the compute runs (GPU split)
 

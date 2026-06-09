@@ -130,17 +130,21 @@ class Executor:
         print("  vision:", self.scene.caption)
         return self.plan.current
 
-    def ambient_caption(self, ego) -> None:
-        """Keep the HUD SEES text matching the live camera, for free (local CV, no API).
-        Skips while a rich ER caption is still being held, and during active vision goals."""
-        if self.c.counter < getattr(self, "_hold_caption_until", 0):
-            return
+    def ambient_perceive(self, ego) -> None:
+        """Continuous perception: every render tick, update the HUD SEES text AND feed what it
+        sees into spatial memory — for free (local CV, no API). Skips during active vision goals
+        and while a rich ER caption is still being held so the user can read it."""
         if self.goal.kind in ("go_to_visual", "look_at"):
             return  # these actively manage the camera/steering themselves
         if self.vision is None:
             return
         r = self.vision.quick_look(ego)
-        if r and r.get("caption"):
+        if not r:
+            return
+        self._learn(r)   # feed perceptions into memory continuously (positions update live)
+        if self.c.counter < getattr(self, "_hold_caption_until", 0):
+            return        # keep a recent rich ER caption visible a moment longer
+        if r.get("caption"):
             self.scene.caption = r["caption"]
 
     def _learn(self, r: dict) -> None:
@@ -284,8 +288,10 @@ def build(width: int = 1280, height: int = 720):
     return bus, c, percept, brain, nav, ex, scene, memory
 
 
-def run_interactive(seconds: float, width: int = 1280, height: int = 720) -> int:
+def run_interactive(seconds: float, width: int = 1280, height: int = 720,
+                    look_secs: float = 0.0) -> int:
     bus, c, percept, brain, nav, ex, scene, memory = build(width, height)
+    last_er = -10**9   # control-tick of the last auto ER refresh
     chat = Chat(); chat.start()
     print("LLM intent:", "Gemini" if brain._client else "offline fallback")
 
@@ -340,7 +346,15 @@ def run_interactive(seconds: float, width: int = 1280, height: int = 720) -> int
                               height=p.height, upright=p.upright)
                 bus.publish("/feedback", fb)
                 ego = percept.render_ego()          # robot's-eye view
-                ex.ambient_caption(ego)             # keep SEES text matching the live camera (free)
+                # Continuous perception: free local-CV caption + feed memory every frame; and,
+                # if --look-secs>0 and ER quota allows, a slow rich ER refresh on a timer.
+                if look_secs and ex.vision and ex.vision.er_available \
+                        and ex.goal.kind not in ("go_to_visual", "look_at") \
+                        and (c.counter - last_er) >= int(look_secs / c.sim_dt):
+                    last_er = c.counter
+                    ex._do_look()                   # rich ER caption + multi-object memory
+                else:
+                    ex.ambient_perceive(ego)        # keep SEES live + memory fed (free)
                 frame = overlay.draw(ego, ex.goal, scene, ex.plan, fb)
                 cv2.imshow(hud, frame)
                 key = cv2.waitKey(1) & 0xFF
@@ -441,5 +455,9 @@ if __name__ == "__main__":
                     help="optional safety time cap in seconds; 0 = run until you quit")
     ap.add_argument("--width", type=int, default=1280)
     ap.add_argument("--height", type=int, default=720)
+    ap.add_argument("--look-secs", type=float, default=0.0,
+                    help="auto rich ER vision refresh every N seconds (0=off; uses ER quota). "
+                         "Free local-CV perception + memory always run continuously.")
     a = ap.parse_args()
-    raise SystemExit(run_script() if a.script else run_interactive(a.seconds, a.width, a.height))
+    raise SystemExit(run_script() if a.script
+                     else run_interactive(a.seconds, a.width, a.height, a.look_secs))
