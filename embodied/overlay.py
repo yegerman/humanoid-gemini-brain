@@ -33,6 +33,9 @@ def draw(rgb: np.ndarray, goal: Goal, scene: SceneView, plan: Plan, fb: Feedback
     up = "UP" if fb.upright else "DOWN"
     _put(out, f"POS ({fb.pos[0]:+.2f},{fb.pos[1]:+.2f}) h={fb.height:.2f} yaw={np.degrees(fb.yaw):+.0f} [{up}]",
          y0 + int(70 * s), (180, 230, 180) if fb.upright else (120, 120, 255), s)
+    # Which brain decided (ER-boss demo only; classic demo leaves plan.brain unset -> no line).
+    if getattr(plan, "brain", ""):
+        _put(out, f"BRAIN: {plan.brain}", h - int(8 * s), (255, 180, 120), s)
     return out
 
 

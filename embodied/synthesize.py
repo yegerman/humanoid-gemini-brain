@@ -163,6 +163,69 @@ def make_point_right(seconds: float = 3.0) -> str:
     return _save("point_right", *_static(dof))
 
 
+# --- generic, spec-driven synthesis (used by the 3.5 skill sub-agent, M3.6) -----------------
+# Named DOFs a skill spec may move. Authored skills are restricted to arms + waist (upper body)
+# so they stay quasi-static and upright; leg DOFs are intentionally NOT exposed.
+DOF = {
+    "R_SH_PITCH": R_SH_PITCH, "R_SH_ROLL": R_SH_ROLL, "R_SH_YAW": R_SH_YAW, "R_ELBOW": R_ELBOW,
+    "L_SH_PITCH": L_SH_PITCH, "L_SH_ROLL": L_SH_ROLL, "L_SH_YAW": L_SH_YAW, "L_ELBOW": L_ELBOW,
+    "WAIST_YAW": WAIST_YAW, "WAIST_ROLL": WAIST_ROLL, "WAIST_PITCH": WAIST_PITCH,
+}
+# Conservative safe ranges (radians) per named DOF — authored targets are clipped to these.
+SAFE_RANGE = {
+    "R_SH_PITCH": (-2.6, 0.6), "L_SH_PITCH": (-2.6, 0.6),
+    "R_SH_ROLL": (-1.6, 0.2), "L_SH_ROLL": (-0.2, 1.6),
+    "R_SH_YAW": (-1.2, 1.2), "L_SH_YAW": (-1.2, 1.2),
+    "R_ELBOW": (-0.2, 1.6), "L_ELBOW": (-0.2, 1.6),
+    "WAIST_YAW": (-0.5, 0.5), "WAIST_ROLL": (-0.4, 0.4), "WAIST_PITCH": (-0.4, 0.6),
+}
+
+
+def synthesize_from_spec(spec: dict) -> str:
+    """Build + cache a GMT motion from a 3.5-authored skill spec. Pure data, no eval/exec.
+
+    spec = {"name", "seconds"?, "channels":[{"dof","target","ramp"?}], "oscillate":{...}?}
+    Each channel ramps a named arm/waist DOF from the standing default to a clipped target;
+    optional `oscillate` adds a bounded sine on one DOF. Returns the saved .pkl path.
+    """
+    name = str(spec.get("name") or "authored").strip().replace(" ", "_")[:40] or "authored"
+    seconds = float(spec.get("seconds", 3.0))
+    seconds = max(1.0, min(6.0, seconds))
+    n = int(seconds * FPS)
+    dof = np.tile(DEFAULT, (n, 1))
+
+    for ch in spec.get("channels", []) or []:
+        key = str(ch.get("dof", "")).upper()
+        if key not in DOF:
+            continue   # ignore unknown / leg DOFs for safety
+        idx = DOF[key]
+        lo, hi = SAFE_RANGE[key]
+        target = float(np.clip(float(ch.get("target", DEFAULT[idx])), lo, hi))
+        ramp = float(np.clip(float(ch.get("ramp", 0.3)), 0.05, 1.0))
+        for i in range(n):
+            a = min(1.0, i / (ramp * n))
+            dof[i, idx] = DEFAULT[idx] + a * (target - DEFAULT[idx])
+
+    osc = spec.get("oscillate")
+    if isinstance(osc, dict):
+        key = str(osc.get("dof", "")).upper()
+        if key in DOF:
+            idx = DOF[key]
+            lo, hi = SAFE_RANGE[key]
+            hz = float(np.clip(float(osc.get("hz", 1.5)), 0.2, 3.0))
+            amp = float(np.clip(float(osc.get("amp", 0.3)), 0.0, 0.6))
+            for i in range(n):
+                a = min(1.0, i / (0.25 * n))
+                dof[i, idx] = float(np.clip(dof[i, idx] + a * amp * np.sin(2 * np.pi * hz * i / FPS),
+                                            lo, hi))
+
+    # Final safety clip across all named DOFs.
+    for key, idx in DOF.items():
+        lo, hi = SAFE_RANGE[key]
+        dof[:, idx] = np.clip(dof[:, idx], lo, hi)
+    return _save(name, *_static(dof))
+
+
 def make_all() -> dict:
     return {
         "stand": make_stand(),

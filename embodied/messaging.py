@@ -39,6 +39,7 @@ class Plan:
     steps: list[str] = field(default_factory=list)  # human-readable plan
     reasoning: str = ""                              # "what it's thinking"
     current: str = ""
+    brain: str = ""            # which brain decided: "ER" | "3.5" | "local" (M3.6); "" = unset
 
 
 @dataclass

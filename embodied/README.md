@@ -7,13 +7,27 @@ via a pretrained RL policy — while a live HUD shows what it **sees**, **thinks
 
 ## Run it
 
+Two demos share the same robot, scene, memory and HUD — they differ only in the brain:
+
 ```bash
-# Interactive (headed) — opens the 3D viewer + the onboard-camera HUD, then chat in the terminal
+# Classic demo — Gemini 3.5 Flash parses intent, Gemini-ER is the eyes
 E:\huminoid\.venv\Scripts\python.exe embodied\run_navigation_demo.py
 
-# Headless acceptance gates (saves _gateA..D.png, prints PASS/FAIL)
+# ER-boss demo (M3.6) — Gemini-ER decides every command from the live camera + memory,
+# and delegates unknown skills to a 3.5 Flash sub-agent that AUTHORS new motions on the fly
+E:\huminoid\.venv\Scripts\python.exe embodied\run_orchestrator_demo.py
+
+# Headless acceptance gates (classic; saves _gateA..D.png, prints PASS/FAIL)
 E:\huminoid\.venv\Scripts\python.exe embodied\run_navigation_demo.py --script
+
+# Per-model tests (validate each model independently)
+E:\huminoid\.venv\Scripts\python.exe embodied\test_models.py --all   # or --local / --flash / --er
 ```
+
+In the ER-boss demo the HUD shows `BRAIN: ER | 3.5 | local` (who decided), and a novel command
+like "salute" makes ER ask the 3.5 sub-agent to author + synthesize a new skill, which the robot
+then performs. ER runs per command on the paid tier; if it's momentarily rate-limited the classic
+planner takes over so the demo never freezes.
 
 The demo runs **until you quit** — type `quit`/`exit`/`q`, press `q` in the HUD window, or close
 a window. (Optional safety cap: `--seconds 120`.)
