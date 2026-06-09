@@ -70,6 +70,7 @@ def run_interactive(seconds: float, width: int = 1280, height: int = 720,
                 goal, plan = brain.plan(cmd, scene, memory, image=ego)
                 ex.set(goal, plan)
                 print(f"  [{plan.brain or '?'}] {goal.kind} {goal.target_xy or goal.skill} | {plan.reasoning}")
+                print(f"  Jorge: {base.jorge_reply(cmd, goal, plan, scene)}")
             ex.tick()
             if t % render_every == 0:
                 viewer.sync()

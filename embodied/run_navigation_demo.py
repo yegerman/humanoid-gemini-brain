@@ -49,6 +49,42 @@ SKILL_MOTIONS = synthesize.make_all()  # {"stand":path, "raise_right_hand":path}
 _COLOR_WORDS = ("red", "orange", "yellow", "green", "blue", "purple")
 
 
+def jorge_reply(cmd: str, goal, plan, scene) -> str:
+    """Compose Jorge's first-person spoken reply to a command (no extra LLM call — uses the
+    caption + plan already computed), so he chats back in the terminal."""
+    k = goal.kind
+    cap = (scene.caption or "").replace("Onboard view:", "").replace("I see", "").strip().rstrip(".")
+    if k == "look":
+        return f"I see {cap}." if cap else "I don't see anything notable right now."
+    if k == "look_at":
+        return f"Looking back toward the {goal.target_name or 'object'}."
+    if k == "go_to":
+        return f"Okay, walking to {goal.target_name or 'the stage'}."
+    if k == "go_to_visual":
+        tgt = goal.target_name or "it"
+        return f"I haven't spotted the {tgt} yet — let me look around and head for it."
+    if k == "skill":
+        sk = (goal.skill or "").replace("_", " ")
+        r = (plan.reasoning or "").lower()
+        action = _clean_action(cmd)
+        if "authored" in r:
+            return f"I didn't have a '{action}' move, so I made one up on the spot: {sk}."
+        if "closest" in r or "guess" in r:
+            return f"I can't '{action}', but the closest I can do is {sk} - here goes."
+        return f"Sure, {sk}!"
+    return "I'm not sure what you mean, so I'll just stand by."
+
+
+def _clean_action(cmd: str) -> str:
+    """Strip polite filler so 'can you do run?' -> 'run' for a natural reply."""
+    c = cmd.lower().strip().rstrip("?.!")
+    for pre in ("can you ", "could you ", "would you ", "please ", "i want you to ",
+                "do a ", "do an ", "do the ", "do ", "go ", "now "):
+        if c.startswith(pre):
+            c = c[len(pre):]
+    return c.strip() or cmd.strip()
+
+
 def _color_key(label: str) -> str:
     """Canonical memory key: the color word in a label (so 'yellow cylinder'/'yellow pillar'
     merge to 'yellow'); falls back to the full label when no color is present."""
@@ -375,6 +411,7 @@ def run_interactive(seconds: float, width: int = 1280, height: int = 720,
                     goal, plan = brain.plan(cmd, scene, memory)
                 ex.set(goal, plan)
                 print(f"  brain: {goal.kind} {goal.target_xy or goal.skill} | {plan.reasoning}")
+                print(f"  Jorge: {jorge_reply(cmd, goal, plan, scene)}")
             ex.tick()
             if t % render_every == 0:
                 viewer.sync()                       # refresh the interactive 3D view
