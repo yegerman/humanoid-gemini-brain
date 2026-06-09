@@ -46,6 +46,18 @@ import synthesize
 
 SKILL_MOTIONS = synthesize.make_all()  # {"stand":path, "raise_right_hand":path}
 
+_COLOR_WORDS = ("red", "orange", "yellow", "green", "blue", "purple")
+
+
+def _color_key(label: str) -> str:
+    """Canonical memory key: the color word in a label (so 'yellow cylinder'/'yellow pillar'
+    merge to 'yellow'); falls back to the full label when no color is present."""
+    toks = label.lower().split()
+    for t in toks:
+        if t in _COLOR_WORDS:
+            return t
+    return label.lower()
+
 
 def skill_motion(skill: str) -> str:
     if skill in SKILL_MOTIONS:
@@ -161,9 +173,12 @@ class Executor:
             label = (d.get("label") or "").strip().lower()
             if not label or float(d.get("size", 0.0)) <= 0.0:
                 continue
+            # Key memory by COLOR when present so repeated sightings of one prop merge into a
+            # single stable entry (the shape guess flips frame-to-frame and would fragment it).
+            key = _color_key(label)
             tx, ty = self._estimate_target(pr, d)
-            self.memory.update(label, (tx, ty), self.c.counter)
-            self.scene.targets[label] = (tx, ty)
+            self.memory.update(key, (tx, ty), self.c.counter)
+            self.scene.targets[key] = (tx, ty)
 
     def _begin_look_at(self, goal: Goal) -> None:
         """Recall a remembered object and turn in place to face it, then look (Voyager recall:
@@ -219,19 +234,41 @@ class Executor:
         return self.plan.current
 
     def _estimate_target(self, pr, rd) -> tuple:
-        """One detection -> disk world (x,y): bearing from cx, range from apparent size."""
+        """One detection -> world (x,y) by casting a ray from the object's base pixel to the
+        ground plane (z=0), using the robot's REAL ego-camera pose. Accurate for any size/shape
+        because props rest on the floor — unlike the old disk-only apparent-size heuristic. Falls
+        back to that heuristic only if the camera ray is degenerate (object near the horizon)."""
         import math
+        import numpy as np
+        import mujoco
+        try:
+            cam_id = mujoco.mj_name2id(self.c.model, mujoco.mjtObj.mjOBJ_CAMERA, "ego")
+            cam_pos = np.array(self.c.data.cam_xpos[cam_id], dtype=float)
+            cam_mat = np.array(self.c.data.cam_xmat[cam_id], dtype=float).reshape(3, 3)
+            fovy = math.radians(float(self.c.model.cam_fovy[cam_id]))
+            w, h = 640, 480
+            fovx = 2 * math.atan(math.tan(fovy / 2) * w / h)
+            nx = float(rd.get("cx", 0.0))
+            ny = float(rd.get("by", rd.get("cy", 0.0)))   # base of object = floor contact
+            # Camera frame (OpenGL/MuJoCo): +X right, +Y up, looks down -Z.
+            d_cam = np.array([math.tan(fovx / 2) * nx, math.tan(fovy / 2) * (-ny), -1.0])
+            d_world = cam_mat @ d_cam
+            if d_world[2] < -1e-4:                         # ray points down to the floor
+                t = -cam_pos[2] / d_world[2]
+                p = cam_pos + t * d_world
+                return float(p[0]), float(p[1])
+        except Exception:
+            pass
+        # Fallback: bearing + apparent-size range (disk calibration).
         w, h = 640, 480
         fovy = math.radians(78.0)
         fovx = 2 * math.atan(math.tan(fovy / 2) * w / h)
         cx = float(rd.get("cx", 0.0))
         size = max(0.05, float(rd.get("size", 0.15)))
-        angle = math.atan(cx * math.tan(fovx / 2))   # horizontal bearing offset (cam frame)
-        rng = 0.375 / size                            # calibrated camera->disk ground range
-        heading = pr.yaw + angle                      # body +x (camera forward) is along yaw
-        tx = float(pr.pos[0] + rng * math.cos(heading))
-        ty = float(pr.pos[1] + rng * math.sin(heading))
-        return tx, ty
+        angle = math.atan(cx * math.tan(fovx / 2))
+        rng = 0.375 / size
+        heading = pr.yaw + angle
+        return float(pr.pos[0] + rng * math.cos(heading)), float(pr.pos[1] + rng * math.sin(heading))
 
     def _arrive(self) -> str:
         self._arrived_v = True

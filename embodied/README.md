@@ -100,8 +100,10 @@ out because it needs CUDA + ~24 GB VRAM (see `DESIGN.md`).
   aspect-ratio shape guess, so the caption + memory track the camera without ER. Precise shape /
   rich descriptions still need ER (which now retries after a ~60 s cooldown rather than staying
   disabled for the session).
-- **World-position estimates** use a single-shot bearing+range heuristic calibrated for the disk;
-  for tall/large props it's approximate — good enough to navigate within arrival tolerance.
+- **World-position estimates** cast a ray from the object's base pixel to the ground plane using
+  the robot's real ego-camera pose — accurate for any size/shape since props rest on the floor
+  (e.g. green sphere estimated at (3.6, 1.47) vs true (3.6, 1.4)). Far/edge/occluded objects are
+  less precise. Memory is keyed by color so repeated sightings merge into one stable entry.
 
 ## Configuration
 

@@ -138,10 +138,12 @@ class VisionBrain:
             x, y, bw, bh = cv2.boundingRect(c)
             cx = ((x + bw / 2) / w) * 2 - 1
             cy = ((y + bh / 2) / h) * 2 - 1
+            by = ((y + bh) / h) * 2 - 1     # bottom of bbox = where the object meets the floor
             size = float(bw / w)
             shape = self._guess_shape(color, bw, bh)
             objects.append({"label": f"{color} {shape}", "color": color, "cx": float(cx),
-                            "cy": float(cy), "size": size, "_area": float(cv2.contourArea(c))})
+                            "cy": float(cy), "by": float(by), "size": size,
+                            "_area": float(area)})
             if color == "red":
                 red = {"visible": True, "cx": float(cx), "cy": float(cy), "size": size}
         objects.sort(key=lambda o: o["_area"], reverse=True)
