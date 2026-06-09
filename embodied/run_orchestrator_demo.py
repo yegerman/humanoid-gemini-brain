@@ -30,16 +30,15 @@ import overlay
 
 
 def run_interactive(seconds: float, width: int = 1280, height: int = 720,
-                    er_secs: float = 30.0) -> int:
+                    er_secs: float = 60.0) -> int:
     bus, c, percept, _classic_brain, nav, ex, scene, memory = build(width, height)
-    # Swap in the ER orchestrator; it registers authored skills straight into SKILL_MOTIONS
-    # so skill_motion() finds them. ER decisions AND ER scene-refresh are both throttled to
-    # ~once per er_secs to save money; between them the cheap local/3.5 planner handles commands.
+    # Swap in the ER orchestrator. ER (image call) fires ONLY on a command, and at most once per
+    # er_secs (default 60s = 1/min) so it stays under the preview model's per-minute rate limit.
+    # Ambient perception is ALWAYS the free local detector (never ER), so memory keeps filling
+    # continuously for free; between ER turns the cheap local/3.5 planner handles commands.
     brain = OrchestratorBrain(skill_registry=SKILL_MOTIONS, er_period_s=er_secs)
-    look_secs = er_secs
-    last_er = -10**9
     chat = Chat(); chat.start()
-    print(f"BRAIN: Gemini-ER orchestrator (ER ~every {er_secs:.0f}s to save cost)"
+    print(f"BRAIN: Gemini-ER orchestrator (ER ~every {er_secs:.0f}s, rate-safe; free local vision between)"
           if brain._client else "BRAIN: offline fallback (no key)")
 
     import mujoco.viewer
@@ -79,13 +78,7 @@ def run_interactive(seconds: float, width: int = 1280, height: int = 720,
                               height=p.height, upright=p.upright)
                 bus.publish("/feedback", fb)
                 ego = percept.render_ego()
-                if look_secs and ex.vision and ex.vision.er_available \
-                        and ex.goal.kind not in ("go_to_visual", "look_at") \
-                        and (c.counter - last_er) >= int(look_secs / c.sim_dt):
-                    last_er = c.counter
-                    ex._do_look()
-                else:
-                    ex.ambient_perceive(ego)
+                ex.ambient_perceive(ego)   # always free local vision -> caption + memory (no ER, no rate limit)
                 frame = overlay.draw(ego, ex.goal, scene, ex.plan, fb)
                 cv2.imshow(hud, frame)
                 key = cv2.waitKey(1) & 0xFF
@@ -121,8 +114,9 @@ if __name__ == "__main__":
                     help="optional safety time cap in seconds; 0 = run until you quit")
     ap.add_argument("--width", type=int, default=1280)
     ap.add_argument("--height", type=int, default=720)
-    ap.add_argument("--er-secs", type=float, default=30.0,
-                    help="call Gemini-ER (see + decide) at most once per N seconds to save cost; "
-                         "between calls the cheap local/3.5 planner handles commands. 0 = ER every command.")
+    ap.add_argument("--er-secs", type=float, default=60.0,
+                    help="call Gemini-ER (see + decide) at most once per N seconds — default 60 "
+                         "(1/min) to stay under the preview rate limit. Between calls the cheap "
+                         "local/3.5 planner handles commands. 0 = ER every command.")
     a = ap.parse_args()
     raise SystemExit(run_interactive(a.seconds, a.width, a.height, a.er_secs))

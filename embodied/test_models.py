@@ -106,16 +106,68 @@ def test_er() -> bool:
     return good and grounded
 
 
+def test_jorge() -> bool:
+    """End-to-end: Jorge looks around (360°) to fill memory, then is told to GO TO a remembered
+    object and must actually walk to it (memory -> grounded plan -> nav -> arrival)."""
+    import math
+    import numpy as np
+    import mujoco
+    import run_navigation_demo as base
+    bus, c, percept, brain, nav, ex, scene, memory = base.build()
+
+    # 1) Look around: rotate Jorge's base to several headings and learn what he sees (free local).
+    mujoco.mj_resetDataKeyframe(c.model, c.data, 0)
+    for deg in (0, 60, 120, 180, 240, 300):
+        yaw = math.radians(deg)
+        c.data.qpos[3:7] = [math.cos(yaw / 2), 0.0, 0.0, math.sin(yaw / 2)]  # w,x,y,z about z
+        mujoco.mj_forward(c.model, c.data)
+        ex._learn(ex.vision.quick_look(percept.render_ego()))
+    known = memory.known()
+    print("  [jorge] looked around -> memory:",
+          {k: (round(v[0], 1), round(v[1], 1)) for k, v in known.items()})
+    if not known:
+        print("  [jorge] memory empty -> FAIL"); percept.close(); return False
+
+    # 2) Ask Jorge to go to a remembered object; he must plan from memory and walk there.
+    target = "green sphere"
+    g, p = brain.plan(f"go to the {target}", scene, memory)
+    recalled = g.kind == "go_to" and g.target_xy is not None
+    print(f"  [jorge] '{target}' -> {g.kind} target_xy={g.target_xy} (recalled={recalled})")
+    if not recalled:
+        percept.close(); return False
+
+    mujoco.mj_resetDataKeyframe(c.model, c.data, 0); mujoco.mj_forward(c.model, c.data)
+    ex.set(g, p)
+    for i in range(int(20.0 / c.sim_dt)):
+        c.step()
+        if i % c.sim_decimation == 0:
+            ex.tick()
+        pr = c.get_proprio()
+        if g.target_xy and np.linalg.norm(np.array(g.target_xy) - pr.pos[:2]) < 0.7:
+            break
+    pr = c.get_proprio()
+    gid = mujoco.mj_name2id(c.model, mujoco.mjtObj.mjOBJ_GEOM, "prop_ball")  # the green sphere
+    truth = np.array(c.model.geom_pos[gid][:2], dtype=float)
+    dist = float(np.linalg.norm(truth - pr.pos[:2]))
+    good = dist < 1.3 and pr.upright
+    print(f"  [jorge] walked to {tuple(round(float(x),1) for x in pr.pos[:2])}; "
+          f"dist to real green={dist:.2f} upright={pr.upright} {'ok' if good else 'FAIL'}")
+    percept.close()
+    return good
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--local", action="store_true")
     ap.add_argument("--flash", action="store_true")
     ap.add_argument("--er", action="store_true")
+    ap.add_argument("--jorge", action="store_true", help="end-to-end: look around -> go to a remembered object")
     ap.add_argument("--all", action="store_true")
     a = ap.parse_args()
-    run = {"local": a.local or a.all, "flash": a.flash or a.all, "er": a.er or a.all}
+    run = {"local": a.local or a.all, "flash": a.flash or a.all,
+           "er": a.er or a.all, "jorge": a.jorge or a.all}
     if not any(run.values()):
-        run = {"local": True, "flash": True, "er": True}  # default: all
+        run = {"local": True, "flash": True, "er": True, "jorge": True}  # default: all
     results = {}
     if run["local"]:
         print("== LOCAL =="); results["local"] = test_local()
@@ -123,6 +175,8 @@ def main() -> int:
         print("== FLASH =="); results["flash"] = test_flash()
     if run["er"]:
         print("== ER =="); results["er"] = test_er()
+    if run["jorge"]:
+        print("== JORGE (look around -> go to remembered object) =="); results["jorge"] = test_jorge()
     print("\nRESULT:", {k: ("PASS" if v else "FAIL") for k, v in results.items()})
     return 0 if all(results.values()) else 1
 
