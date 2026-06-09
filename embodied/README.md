@@ -7,8 +7,18 @@ via a pretrained RL policy — while a live HUD shows what it **sees**, **thinks
 
 ## Run it
 
-Two demos share the same robot, scene, memory and HUD — they differ only in the brain:
+Two demos share the same robot, scene, memory and HUD — they differ only in the brain.
 
+**Quick launch (from the repo root, no venv path needed):**
+```powershell
+.\demo-er.bat            # ER-boss demo (default --er-secs 30)
+.\demo.bat               # classic demo
+.\demo.bat --script      # headless gates
+.\demo-er.bat --er-secs 60   # spend even less on ER
+```
+(`.ps1` versions exist too: `.\demo-er.ps1`.)
+
+Or call Python directly:
 ```bash
 # Classic demo — Gemini 3.5 Flash parses intent, Gemini-ER is the eyes
 E:\huminoid\.venv\Scripts\python.exe embodied\run_navigation_demo.py
