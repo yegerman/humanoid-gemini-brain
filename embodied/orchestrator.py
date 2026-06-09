@@ -84,7 +84,41 @@ class OrchestratorBrain:
         # Fallback / between-ER: classic planner (already grounded + never-refuse).
         goal, plan = self.fallback.plan(command, scene, memory)
         plan.brain = "3.5" if (self.fallback._client and "quota" not in plan.reasoning) else "local"
+        # If the fallback only found a weak closest-skill guess for a novel action, AUTHOR a real
+        # skill instead (cheap 3.5 text sub-agent, model-fallback — not the throttled ER image
+        # call). This lets Jorge "learn" moves like 'dance' between ER turns, too.
+        if goal.kind == "skill" and self._client is not None:
+            r = (plan.reasoning or "").lower()
+            if "closest" in r or "guess" in r:
+                self._author_for(command, goal, plan)
         return goal, plan
+
+    def _author_for(self, command: str, goal, plan) -> None:
+        """Author (or reuse) a skill for a novel command and point the goal at it."""
+        name = self._skill_name(command)
+        if name in self.skill_registry:                 # already learned this -> reuse
+            skname = name
+        else:
+            skname, path = skills_author.build_skill(name, command, self._client, types=self._types)
+            if not path:
+                return                                  # all flash models unavailable -> keep guess
+            self.skill_registry[skname] = path
+            if skname not in planner.ALL_SKILLS:
+                planner.ALL_SKILLS.append(skname)
+        goal.skill = skname
+        plan.reasoning = f"authored skill '{skname}' for '{command.strip()}'"
+        plan.current = skname
+        plan.brain = "3.5*"                             # * = authored a new skill
+
+    @staticmethod
+    def _skill_name(command: str) -> str:
+        c = command.lower().strip().rstrip("?.!")
+        for pre in ("can you ", "could you ", "would you ", "please ", "try to ",
+                    "i want you to ", "learn to ", "do a ", "do an ", "do the ", "do ", "go "):
+            if c.startswith(pre):
+                c = c[len(pre):]
+        c = re.sub(r"[^a-z0-9]+", "_", c).strip("_")
+        return c[:24] or "move"
 
     # ---- ER planning ----
     def _context(self, scene: SceneView | None, known: dict) -> str:
