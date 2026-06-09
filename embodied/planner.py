@@ -112,6 +112,7 @@ class Brain:
         # vision: "what do you see", "look", "describe"
         see_word = _fuzzy_in(toks, "see", "look", "describe", "vision", "watching", "observe")
         circle_word = _fuzzy_in(toks, "circle", "disk", "disc", "red")
+        find_word = _fuzzy_in(toks, "find", "search", "locate", "spot")
         go_verb0 = _fuzzy_in(toks, "go", "walk", "move", "head", "navigate", "approach", "reach", "come")
 
         # stand up / get up / recover -> the recover-to-stand skill (before bare 'stand')
@@ -127,12 +128,18 @@ class Brain:
                 return {"kind": "look_at", "target": obj, "skill": None,
                         "reasoning": f"turn back to look at the {obj}"}
 
-        if see_word and not (go_verb0 or circle_word):
-            return {"kind": "look", "target": None, "skill": None, "reasoning": "describe what I see"}
-        # visual approach to the red circle (see it, then go)
-        if circle_word and (go_verb0 or see_word or _fuzzy_in(toks, "there")):
+        # Explicit visual SEARCH ("find/search/locate the red circle and go there") — Gate D:
+        # spin to acquire the disk by sight, then servo to it. Only when the user asks to *find*.
+        if circle_word and find_word:
             return {"kind": "go_to_visual", "target": "red circle", "skill": None,
                     "reasoning": "find the red circle visually and walk to it"}
+        # "go to the red circle": the disk is the stage landmark at a KNOWN position (2.5,0) —
+        # walk straight there reliably instead of a blind visual spin.
+        if circle_word and (go_verb0 or _fuzzy_in(toks, "there")):
+            return {"kind": "go_to", "target": "stage center", "skill": None,
+                    "reasoning": "walk to the red circle (the stage disk at 2.5,0)"}
+        if see_word and not go_verb0:
+            return {"kind": "look", "target": None, "skill": None, "reasoning": "describe what I see"}
 
         # gestures
         if _fuzzy_in(toks, "wave"):
