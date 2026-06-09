@@ -271,40 +271,6 @@ class Executor:
         return "idle"
 
 
-def _arrange_windows(hud_name: str) -> None:
-    """Lay the two windows out side-by-side, full height: HUD on the left, the MuJoCo 3D
-    viewer on the right. Windows-only (ctypes/user32); silently no-ops elsewhere or on error."""
-    try:
-        import ctypes
-        u = ctypes.windll.user32
-        u.SetProcessDPIAware()
-        sw, sh = u.GetSystemMetrics(0), u.GetSystemMetrics(1)
-        margin, gap, top = 8, 8, 8
-        taskbar = 56
-        half = (sw - 2 * margin - gap) // 2
-        wh = sh - top - taskbar
-        # Left: the OpenCV HUD window.
-        cv2.moveWindow(hud_name, margin, top)
-        cv2.resizeWindow(hud_name, half, wh)
-        # Right: the native MuJoCo viewer window — find it by its title and move it.
-        rx = margin + half + gap
-        titles = []
-        @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
-        def _enum(hwnd, _):
-            n = u.GetWindowTextLengthW(hwnd)
-            if n:
-                buf = ctypes.create_unicode_buffer(n + 1)
-                u.GetWindowTextW(hwnd, buf, n + 1)
-                if "MuJoCo" in buf.value and u.IsWindowVisible(hwnd):
-                    titles.append(hwnd)
-            return True
-        u.EnumWindows(_enum, 0)
-        for hwnd in titles:
-            u.MoveWindow(hwnd, rx, top, half, wh, True)
-    except Exception:
-        pass
-
-
 def build(width: int = 1280, height: int = 720):
     bus = Bus()
     c = GMTController(motion="basic_walk.pkl", scene=str(STAGE_SCENE))
@@ -336,8 +302,6 @@ def run_interactive(seconds: float, width: int = 1280, height: int = 720) -> int
     hud = "G1 HUD - sees / thinks"
     cv2.namedWindow(hud, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(hud, 720, 540)
-    _arrange_windows(hud)   # tile both windows side-by-side, full height
-    _arranged = False       # re-apply once after the first frame is actually shown
 
     render_every = 2  # refresh views every N control ticks
     # Runs until you quit: type quit/exit/q, press q in the HUD, or close either window.
@@ -379,9 +343,6 @@ def run_interactive(seconds: float, width: int = 1280, height: int = 720) -> int
                 ex.ambient_caption(ego)             # keep SEES text matching the live camera (free)
                 frame = overlay.draw(ego, ex.goal, scene, ex.plan, fb)
                 cv2.imshow(hud, frame)
-                if not _arranged:
-                    _arrange_windows(hud)   # re-apply now the HUD window is realized
-                    _arranged = True
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord("q"):
                     break
