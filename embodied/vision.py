@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from pathlib import Path
 
 import cv2
@@ -21,6 +22,18 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 MODELS = ["gemini-robotics-er-1.6-preview", "gemini-2.5-flash", "gemini-2.0-flash"]
+ER_COOLDOWN_S = 60.0   # after a 429, rest a model this long then retry (paid recovers per-minute)
+
+# HSV color ranges (OpenCV H is 0-180) matching the scene props + red stage disk.
+COLOR_RANGES = {
+    "red": [((0, 90, 60), (12, 255, 255)), ((168, 90, 60), (180, 255, 255))],
+    "orange": [((13, 120, 80), (24, 255, 255))],
+    "yellow": [((25, 90, 80), (35, 255, 255))],
+    "green": [((36, 70, 50), (85, 255, 255))],
+    "blue": [((95, 130, 60), (130, 255, 255))],   # high S/V so the gray-blue floor tiles don't match
+    "purple": [((131, 60, 50), (167, 255, 255))],
+}
+MAX_BLOB_FRAC = 0.40   # reject blobs bigger than this fraction of the frame (floor/walls/background)
 
 PROMPT = """You are the eyes of a humanoid robot, looking forward from its head.
 1) Describe what you see in ONE short sentence.
@@ -41,7 +54,7 @@ class VisionBrain:
     def __init__(self, models=MODELS) -> None:
         self.models = list(models)
         self._client = None
-        self._dead: set[str] = set()  # models that returned quota errors this session
+        self._cooldown: dict[str, float] = {}  # model -> monotonic time until it may retry
         key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         if key:
             try:
@@ -59,7 +72,8 @@ class VisionBrain:
 
     @property
     def er_available(self) -> bool:
-        return self._client is not None and any(m not in self._dead for m in self.models)
+        now = time.monotonic()
+        return self._client is not None and any(self._cooldown.get(m, 0.0) <= now for m in self.models)
 
     def look(self, rgb: np.ndarray) -> dict | None:
         """rgb: HxWx3 RGB. Tries Gemini-ER for a rich caption; falls back to local
@@ -80,9 +94,10 @@ class VisionBrain:
         if not ok:
             return None
         part = self._types.Part.from_bytes(data=buf.tobytes(), mime_type="image/jpeg")
+        now = time.monotonic()
         for model in self.models:
-            if model in self._dead:
-                continue
+            if self._cooldown.get(model, 0.0) > now:
+                continue   # still resting after a recent 429
             try:
                 resp = self._client.models.generate_content(
                     model=model, contents=[PROMPT, part],
@@ -96,33 +111,66 @@ class VisionBrain:
                     return data
             except Exception as e:
                 if "RESOURCE_EXHAUSTED" in str(e) or "429" in str(e):
-                    self._dead.add(model)
+                    self._cooldown[model] = time.monotonic() + ER_COOLDOWN_S  # retry later
                 continue
         return None
 
     def _look_local(self, rgb: np.ndarray) -> dict:
-        """Local red-disk detection via HSV color thresholding on the onboard frame."""
+        """Free multi-color HSV detection — names the colored props in view (no API), so the
+        live caption + memory track the camera even when ER quota is unavailable. Shape is a
+        coarse aspect-ratio guess; the red one is also returned as `red_disk` for servoing."""
         h, w = rgb.shape[:2]
         hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
-        mask = cv2.inRange(hsv, (0, 90, 60), (12, 255, 255)) | \
-            cv2.inRange(hsv, (168, 90, 60), (180, 255, 255))
-        cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        objects = []
         red = {"visible": False, "cx": 0.0, "cy": 0.0, "size": 0.0}
-        caption = "Onboard view: a checkered floor; no red circle in sight."
-        if cnts:
+        for color, ranges in COLOR_RANGES.items():
+            mask = None
+            for lo, hi in ranges:
+                m = cv2.inRange(hsv, lo, hi)
+                mask = m if mask is None else (mask | m)
+            cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not cnts:
+                continue
             c = max(cnts, key=cv2.contourArea)
-            if cv2.contourArea(c) > 60:
-                x, y, bw, bh = cv2.boundingRect(c)
-                cx = ((x + bw / 2) / w) * 2 - 1
-                cy = ((y + bh / 2) / h) * 2 - 1
-                red = {"visible": True, "cx": float(cx), "cy": float(cy), "size": float(bw / w)}
-                side = "ahead" if abs(cx) < 0.2 else ("to the right" if cx > 0 else "to the left")
-                caption = f"Onboard view: a red circular disk on the checkered floor, {side}."
-        # Local CV only knows the red disk; mirror it into objects for memory consistency.
-        objects = [{"label": "red circle", "cx": red["cx"], "cy": red["cy"],
-                    "size": red["size"]}] if red["visible"] else []
-        return {"caption": caption, "red_disk": red, "objects": objects,
-                "model_used": "local-cv"}
+            area = cv2.contourArea(c)
+            if area < 80 or area > MAX_BLOB_FRAC * w * h:
+                continue   # too small (noise) or too big (floor/background)
+            x, y, bw, bh = cv2.boundingRect(c)
+            cx = ((x + bw / 2) / w) * 2 - 1
+            cy = ((y + bh / 2) / h) * 2 - 1
+            size = float(bw / w)
+            shape = self._guess_shape(color, bw, bh)
+            objects.append({"label": f"{color} {shape}", "color": color, "cx": float(cx),
+                            "cy": float(cy), "size": size, "_area": float(cv2.contourArea(c))})
+            if color == "red":
+                red = {"visible": True, "cx": float(cx), "cy": float(cy), "size": size}
+        objects.sort(key=lambda o: o["_area"], reverse=True)
+        caption = self._caption(objects)
+        for o in objects:
+            o.pop("_area", None)
+        return {"caption": caption, "red_disk": red, "objects": objects, "model_used": "local-cv"}
+
+    @staticmethod
+    def _guess_shape(color: str, bw: int, bh: int) -> str:
+        if color == "red":
+            return "circle"          # the stage disk
+        aspect = bw / max(1, bh)
+        if aspect < 0.7:
+            return "pillar"          # tall and narrow
+        if aspect > 1.4:
+            return "box"             # wide
+        return "sphere"
+
+    @staticmethod
+    def _caption(objects: list) -> str:
+        if not objects:
+            return "Onboard view: a checkered floor; nothing notable in sight."
+        parts = []
+        for o in objects[:3]:
+            cx = o["cx"]
+            side = "ahead" if abs(cx) < 0.2 else ("to the right" if cx > 0 else "to the left")
+            parts.append(f"a {o['label']} {side}")
+        return "Onboard view: " + ", ".join(parts) + "."
 
 
 if __name__ == "__main__":

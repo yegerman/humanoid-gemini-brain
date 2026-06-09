@@ -95,8 +95,11 @@ out because it needs CUDA + ~24 GB VRAM (see `DESIGN.md`).
 
 - **Stand-up** is a clean *state reset* to a balanced standing pose, not a physically-animated
   floor get-up (GMT ships no get-up reference clip).
-- **Offline memory** (when the Gemini vision quota is exhausted) only learns the **red disk** —
-  local OpenCV detection is red-only. Full multi-object recall needs Gemini-ER quota.
+- **Offline vision** (when Gemini-ER quota is unavailable) uses a free local **multi-color HSV**
+  detector: it names colored props (red/orange/yellow/green/blue/purple) with a coarse
+  aspect-ratio shape guess, so the caption + memory track the camera without ER. Precise shape /
+  rich descriptions still need ER (which now retries after a ~60 s cooldown rather than staying
+  disabled for the session).
 - **World-position estimates** use a single-shot bearing+range heuristic calibrated for the disk;
   for tall/large props it's approximate — good enough to navigate within arrival tolerance.
 

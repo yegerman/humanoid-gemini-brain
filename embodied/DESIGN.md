@@ -52,7 +52,7 @@ planner takes over so the demo never freezes.
 | `controller/gmt_controller.py` | GMT pretrained 23-DoF whole-body policy on CPU; tracks a reference motion. `recover_to_stand()` = the stand-up / NaN-instability guard. |
 | `messaging.py` | Typed dataclass messages + in-process pub/sub `Bus` (ROS2-shaped: `/camera`, `/feedback`, …). `Goal` carries `target_xy`/`skill`/`target_name`. |
 | `perception.py` | Renders the 3rd-person + onboard (`render_ego`) camera; reads proprioception; publishes `/camera`,`/feedback`. |
-| `vision.py` | `VisionBrain.look()` → Gemini Robotics-ER 1.6 caption + red-disk + multi-object detections; local OpenCV red-only fallback when offline. |
+| `vision.py` | `VisionBrain.look()` → Gemini Robotics-ER 1.6 caption + red-disk + multi-object detections; free **multi-color HSV** fallback (names colored props + coarse shape) when ER is unavailable. ER 429s set a ~60 s cooldown (retry) instead of disabling for the session. |
 | `memory.py` | `SpatialMemory`: in-session `label -> {xy,last_seen,seen_count}`; fuzzy NL `recall()`; `known()` for grounding. |
 | `planner.py` | `Brain.plan(command, scene, memory)` → `Goal`+`Plan`. Local parser first, then grounded Gemini 3.5 Flash, then never-refuse difflib guess. (Classic brain + the ER-boss fallback.) |
 | `orchestrator.py` | **M3.6** `OrchestratorBrain.plan(command, scene, memory, image)` — Gemini-ER decides every command grounded in memory + image; delegates unknown skills to the 3.5 sub-agent; falls back to `planner.Brain` on ER rate-limit/error. |
