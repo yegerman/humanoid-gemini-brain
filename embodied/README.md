@@ -26,8 +26,12 @@ E:\huminoid\.venv\Scripts\python.exe embodied\test_models.py --all   # or --loca
 
 In the ER-boss demo the HUD shows `BRAIN: ER | 3.5 | local` (who decided), and a novel command
 like "salute" makes ER ask the 3.5 sub-agent to author + synthesize a new skill, which the robot
-then performs. ER runs per command on the paid tier; if it's momentarily rate-limited the classic
-planner takes over so the demo never freezes.
+then performs.
+
+**Cost control:** ER (the expensive image call) sees + decides at most once every **30 s** by
+default (`--er-secs 30`); between those, the cheap local/3.5 planner handles commands, grounded in
+memory + the last ER caption. Use `--er-secs 0` for ER on every command, or a larger number to
+spend even less. If ER is momentarily rate-limited, the classic planner takes over automatically.
 
 The demo runs **until you quit** — type `quit`/`exit`/`q`, press `q` in the HUD window, or close
 a window. (Optional safety cap: `--seconds 120`.)

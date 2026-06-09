@@ -37,9 +37,13 @@ balancing joint trajectories — that belongs to the controller.
             OVERLAY draws SEES / CMD / MEM / THINKS / PLAN / POS / BRAIN(ER|3.5|local)
 ```
 **Memory feeds ER:** the orchestrator's prompt includes `known objects (label→world x,y)` from
-`SpatialMemory`, so ER plans over what was actually seen and never invents coordinates. ER is
-called per command (paid tier); on a per-minute rate-limit it cools down and the classic planner
-takes over so the demo never freezes.
+`SpatialMemory`, so ER plans over what was actually seen and never invents coordinates.
+
+**Cost throttle (`--er-secs`, default 30):** ER (the expensive image call) sees + decides at most
+once per `er_period_s`. Between ER turns the cheap local/3.5 planner handles commands — still
+grounded in memory + the last ER caption — so cost is bounded regardless of command rate. Set
+`--er-secs 0` for ER-on-every-command. On a per-minute rate-limit ER cools down and the classic
+planner takes over so the demo never freezes.
 
 ## Module map (`embodied/`)
 

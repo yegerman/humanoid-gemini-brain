@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from pathlib import Path
 
 import cv2
@@ -47,9 +48,11 @@ Return ONLY JSON:
 
 
 class OrchestratorBrain:
-    def __init__(self, skill_registry: dict | None = None) -> None:
+    def __init__(self, skill_registry: dict | None = None, er_period_s: float = 30.0) -> None:
         self.fallback = planner.Brain()          # classic local -> 3.5 text -> guess
         self.skill_registry = skill_registry if skill_registry is not None else {}
+        self.er_period_s = er_period_s           # call ER (image) at most once per this many seconds
+        self._last_er = -1e9                      # monotonic time of the last ER call
         self._client = None
         self._types = None
         self._er_skip = 0                        # skip ER for N commands after a rate-limit
@@ -66,13 +69,19 @@ class OrchestratorBrain:
     # ---- public API (mirrors planner.Brain.plan, plus the live image) ----
     def plan(self, command: str, scene: SceneView | None = None, memory=None, image=None):
         known = memory.known() if memory is not None else {}
-        if image is not None and self._client is not None and self._er_skip <= 0:
+        # Money-saver: only spend an ER (image) call at most once per `er_period_s`. Between ER
+        # turns the cheap local/3.5 planner handles commands, grounded on memory + the last ER
+        # scene/caption. (er_period_s=0 -> ER on every command, the old behavior.)
+        now = time.monotonic()
+        due = (now - self._last_er) >= self.er_period_s
+        if image is not None and self._client is not None and self._er_skip <= 0 and due:
             data = self._er_plan(command, image, scene, known)
             if data is not None:
+                self._last_er = now
                 return self._finalize(command, data, known, brain="ER")
         elif self._er_skip > 0:
             self._er_skip -= 1
-        # Fallback: classic planner (already grounded + never-refuse).
+        # Fallback / between-ER: classic planner (already grounded + never-refuse).
         goal, plan = self.fallback.plan(command, scene, memory)
         plan.brain = "3.5" if (self.fallback._client and "quota" not in plan.reasoning) else "local"
         return goal, plan
