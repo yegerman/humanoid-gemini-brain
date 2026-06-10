@@ -64,7 +64,10 @@ class OrchestratorBrain:
             try:
                 from google import genai
                 from google.genai import types
-                self._client = genai.Client(api_key=key)
+                # Hard request timeout: a hung cloud call must NOT freeze the sim/chat loop —
+                # it fails fast and the local fallback answers instead.
+                self._client = genai.Client(api_key=key,
+                                            http_options=types.HttpOptions(timeout=15_000))
                 self._types = types
             except Exception:
                 self._client = None

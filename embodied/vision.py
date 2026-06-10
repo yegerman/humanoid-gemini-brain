@@ -62,7 +62,9 @@ class VisionBrain:
             try:
                 from google import genai
                 from google.genai import types
-                self._client = genai.Client(api_key=key)
+                # Hard request timeout so a hung vision call can't freeze the loop (local CV covers).
+                self._client = genai.Client(api_key=key,
+                                            http_options=types.HttpOptions(timeout=15_000))
                 self._types = types
             except Exception:
                 self._client = None
