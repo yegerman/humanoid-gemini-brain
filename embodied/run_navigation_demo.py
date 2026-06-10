@@ -138,6 +138,7 @@ class Executor:
             # SAFETY: kill every motion source immediately — nav target, steering, gait.
             self.nav.target = None
             self.nav.arrived = True
+            self.nav.arrive_tol = 0.7   # in case e-stop interrupted a pick approach
             self.c.steer_yaw_rate = 0.0
             self.c.fwd_scale = 0.0
             self.c.set_motion(skill_motion("stand"), force=True)
@@ -156,7 +157,12 @@ class Executor:
                 self.plan.current = "I don't know where the box is"
                 self._pick_phase = None
             else:
+                self.nav.arrive_tol = 0.45    # get close enough that the bend actually reaches
                 self.nav.go_to(*box)
+                # Visual validation while approaching: track the box by color and re-target.
+                self._pick_color = next((cw for cw in ("magenta", "cyan")
+                                         if goal.target_name and cw in goal.target_name.lower()), None)
+                self._pick_seen_next = self.c.counter
                 self.plan.current = "walking to the box"
         elif goal.kind == "put_down":
             self.c.steer_yaw_rate = 0.0
@@ -301,10 +307,25 @@ class Executor:
         import numpy as np
         phase = getattr(self, "_pick_phase", None)
         if phase == "nav":
+            # Validate the box position BY SIGHT while approaching (free local vision): if the
+            # box is in view, re-estimate its world position and re-target the nav live, so we
+            # bend exactly where the box actually is, not where memory thought it was.
+            if self.c.counter >= getattr(self, "_pick_seen_next", 0) and self.vision:
+                self._pick_seen_next = self.c.counter + int(0.8 / self.c.sim_dt)
+                r = self.vision.quick_look(self.percept.render_ego())
+                want = self._pick_color
+                det = next((o for o in (r or {}).get("objects", [])
+                            if o.get("color") in (("magenta", "cyan") if want is None else (want,))), None)
+                if det is not None:
+                    tx, ty = self._estimate_target(self.c.get_proprio(), det)
+                    self.nav.go_to(tx, ty)
+                    self.plan.current = f"box in sight - approaching ({det.get('color')})"
             st = self.nav.update()
-            self.plan.current = st["status"]
+            if "box in sight" not in self.plan.current or st["arrived"]:
+                self.plan.current = st["status"]
             if st["arrived"]:
                 self._pick_phase = "lift"
+                self.nav.arrive_tol = 0.7     # restore the normal arrival tolerance
                 self.c.steer_yaw_rate = 0.0
                 self.c.fwd_scale = 0.0
                 self.c.set_motion(skill_motion("bend_lift"), force=True)

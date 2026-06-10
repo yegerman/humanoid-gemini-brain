@@ -210,14 +210,20 @@ class GMTController:
         b1 = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "right_rubber_hand")
         p1, q1 = self.data.xpos[b1].copy(), self.data.xquat[b1].copy()
         eq_id, b2 = min(welds, key=lambda w: np.linalg.norm(self.data.xpos[w[1]] - p1))
-        p2, q2 = self.data.xpos[b2].copy(), self.data.xquat[b2].copy()
-        q1inv = np.zeros(4); mujoco.mju_negQuat(q1inv, q1)
-        relpos = np.zeros(3); mujoco.mju_rotVecQuat(relpos, p2 - p1, q1inv)
-        relquat = np.zeros(4); mujoco.mju_mulQuat(relquat, q1inv, q2)
+        # "Magnet snap": move the box INTO the palm before welding, so it is visibly held
+        # in hand instead of frozen mid-air at whatever offset it had at grab time.
+        offset_palm = np.array([0.0, 0.0, -0.09])      # just below the palm, in hand frame
+        snap = np.zeros(3); mujoco.mju_rotVecQuat(snap, offset_palm, q1)
+        jid = self.model.body_jntadr[b2]
+        adr = self.model.jnt_qposadr[jid]
+        self.data.qpos[adr:adr + 3] = p1 + snap
+        self.data.qpos[adr + 3:adr + 7] = q1
+        self.data.qvel[self.model.jnt_dofadr[jid]:self.model.jnt_dofadr[jid] + 6] = 0.0
+        mujoco.mj_forward(self.model, self.data)
         self.model.eq_data[eq_id][:] = 0.0
-        self.model.eq_data[eq_id][3:6] = relpos
-        self.model.eq_data[eq_id][6:10] = relquat
-        self.model.eq_data[eq_id][10] = 1.0   # torquescale
+        self.model.eq_data[eq_id][3:6] = offset_palm    # hold exactly at the palm
+        self.model.eq_data[eq_id][6:10] = [1, 0, 0, 0]  # aligned with the hand
+        self.model.eq_data[eq_id][10] = 1.0             # torquescale
         self.data.eq_active[eq_id] = 1
         return True
 
