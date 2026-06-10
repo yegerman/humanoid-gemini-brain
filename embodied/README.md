@@ -62,7 +62,16 @@ a window. (Optional safety cap: `--seconds 120`.)
 | Look **back** at a remembered object | "look at the red circle" | Turns to face the remembered object, then re-captures it. |
 | Gestures / skills | "raise your right hand", "wave", "bow", "nod", "clap", "celebrate", "point", "turn left/right" | Performs the closest whole-body skill. |
 | Stand up / recover | "get up", "stand up", "recover" | Resets to a stable standing pose (recover-to-stand). |
+| **Inventory scan** | "scan the area", "take stock" | 360° sweep, logs every object, then reports: "Inventory: 7 items. red at (2.5,0.0), …". |
+| **Pick & carry** | "pick up the box" → "take it to the stage" → "put it down" | Walks to the cyan box, bend-lifts it (weld "magnetic gripper"), carries it anywhere, sets it down. |
+| **Emergency stop** | "emergency stop", "estop" | Instantly halts ALL motion — nav target cleared, steering zeroed. |
+| **Return home** | "go home", "return to base" | Walks back to the spawn point (0,0). |
+| **Hand signals** | "halt sign", "wave them in", "point left", "point at the green sphere" | Industrial signals; point-at turns to face a remembered object and points. |
 | Anything unknown | "crawl on the floor", "do a backflip" | **Never refuses** — guesses the closest real skill. |
+
+**Obstacle avoidance:** while navigating, Jorge steers around objects he remembers (repulsive
+steering), slows when something is close ahead, and hard-stops rather than walking into anything
+nearer than ~0.45 m. Running "scan the area" first gives him the full obstacle map.
 
 ## How it stays grounded (no inventing)
 

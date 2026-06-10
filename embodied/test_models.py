@@ -156,18 +156,98 @@ def test_jorge() -> bool:
     return good
 
 
+def test_industry() -> bool:
+    """M3.7: scan->report, pick&carry&put-down, e-stop, go-home, obstacle avoidance."""
+    import numpy as np
+    import mujoco
+    import run_navigation_demo as base
+    bus, c, percept, brain, nav, ex, scene, memory = base.build()
+    brain._client = None    # deterministic offline routing
+    bid = mujoco.mj_name2id(c.model, mujoco.mjtObj.mjOBJ_BODY, "carry_box")
+
+    def run(cmd, secs, stop_carrying=False, track_crate=False):
+        g, p = brain.plan(cmd, scene, memory)
+        ex.set(g, p)
+        min_crate = 1e9
+        for i in range(int(secs / c.sim_dt)):
+            c.step()
+            if i % c.sim_decimation == 0:
+                ex.tick()
+                if track_crate:
+                    d = float(np.linalg.norm(np.array([1.5, 1.9]) - c.get_proprio().pos[:2]))
+                    min_crate = min(min_crate, d)
+            if stop_carrying and getattr(ex, "_pick_phase", None) == "carrying":
+                break
+        return min_crate
+
+    ok = True
+    # (a) scan fills memory and reports
+    run("scan the area", 9.0)
+    rep = ex.plan.current
+    ok_scan = len(memory) >= 4 and rep.startswith("Inventory")
+    print(f"  [industry] scan: {len(memory)} objects, report ok={ok_scan}")
+    ok &= ok_scan
+
+    # (b) pick & carry & put down
+    run("pick up the box", 25.0, stop_carrying=True)
+    lifted = float(c.data.xpos[bid][2]) > 0.3 and c.get_proprio().upright
+    run("go to the center of the stage", 12.0)
+    carried = float(np.linalg.norm(c.data.xpos[bid][:2] - c.get_proprio().pos[:2])) < 0.8
+    run("put it down", 5.0)
+    dropped = float(c.data.xpos[bid][2]) < 0.15 and c.get_proprio().upright
+    print(f"  [industry] pick lifted={lifted} carried={carried} put_down={dropped}")
+    ok &= lifted and carried and dropped
+
+    # (c) e-stop clears everything instantly
+    g, p = brain.plan("go home", scene, memory); ex.set(g, p)
+    for i in range(int(1.0 / c.sim_dt)):
+        c.step()
+        if i % c.sim_decimation == 0: ex.tick()
+    g, p = brain.plan("emergency stop", scene, memory); ex.set(g, p)
+    estop_ok = nav.target is None and c.fwd_scale == 0.0 and c.steer_yaw_rate == 0.0
+    print(f"  [industry] e-stop clears nav+motion: {estop_ok}")
+    ok &= estop_ok
+
+    # (d) go home arrives
+    run("go home", 20.0)
+    home_d = float(np.linalg.norm(c.get_proprio().pos[:2]))
+    home_ok = home_d < 0.9 and c.get_proprio().upright
+    print(f"  [industry] go home: dist={home_d:.2f} ok={home_ok}")
+    ok &= home_ok
+
+    # (e) obstacle avoidance: path to a point behind the blue crate must skirt it
+    memory.update("blue", (1.5, 1.9), c.counter)   # ensure the crate is known precisely
+    g, p = brain.plan("go to the stage", scene, memory)
+    g.target_xy = (3.0, 3.8); ex.set(g, p)         # straight line passes through the crate
+    min_crate = run_avoid = 1e9
+    for i in range(int(22.0 / c.sim_dt)):
+        c.step()
+        if i % c.sim_decimation == 0:
+            ex.tick()
+            d = float(np.linalg.norm(np.array([1.5, 1.9]) - c.get_proprio().pos[:2]))
+            min_crate = min(min_crate, d)
+    end_d = float(np.linalg.norm(np.array([3.0, 3.8]) - c.get_proprio().pos[:2]))
+    avoid_ok = min_crate > 0.45 and c.get_proprio().upright and end_d < 1.2
+    print(f"  [industry] avoidance: min dist to crate={min_crate:.2f} end dist={end_d:.2f} ok={avoid_ok}")
+    ok &= avoid_ok
+
+    percept.close()
+    return ok
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--local", action="store_true")
     ap.add_argument("--flash", action="store_true")
     ap.add_argument("--er", action="store_true")
     ap.add_argument("--jorge", action="store_true", help="end-to-end: look around -> go to a remembered object")
+    ap.add_argument("--industry", action="store_true", help="M3.7: scan/pick&carry/e-stop/home/avoidance")
     ap.add_argument("--all", action="store_true")
     a = ap.parse_args()
     run = {"local": a.local or a.all, "flash": a.flash or a.all,
-           "er": a.er or a.all, "jorge": a.jorge or a.all}
+           "er": a.er or a.all, "jorge": a.jorge or a.all, "industry": a.industry or a.all}
     if not any(run.values()):
-        run = {"local": True, "flash": True, "er": True, "jorge": True}  # default: all
+        run = {"local": True, "flash": True, "er": True, "jorge": True, "industry": True}
     results = {}
     if run["local"]:
         print("== LOCAL =="); results["local"] = test_local()
@@ -177,6 +257,8 @@ def main() -> int:
         print("== ER =="); results["er"] = test_er()
     if run["jorge"]:
         print("== JORGE (look around -> go to remembered object) =="); results["jorge"] = test_jorge()
+    if run["industry"]:
+        print("== INDUSTRY (scan / pick&carry / e-stop / home / avoidance) =="); results["industry"] = test_industry()
     print("\nRESULT:", {k: ("PASS" if v else "FAIL") for k, v in results.items()})
     return 0 if all(results.values()) else 1
 

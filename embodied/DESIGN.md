@@ -123,6 +123,25 @@ for anything that still escapes.
 - **NVIDIA GR00T — ruled out** for local use: needs CUDA + ~24 GB VRAM (machine has AMD RX 580 /
   4 GB). The `Brain` interface is swappable so a cloud-GPU GR00T could drop in later.
 
+## Industry skills (M3.7)
+
+- **Inventory scan** — goal kind `scan`: rotate 360° learning via free local vision every 0.5 s,
+  then report `memory.known()` as a structured inventory (Executor `_inventory_report`).
+- **Pick & carry** — `carry_box` free body in `scene_stage.xml` + a disabled `weld` equality
+  ("magnetic gripper"); `GMTController.grab(on)` re-anchors the weld to the current hand→box
+  pose and toggles it. Flow (`Executor._tick_pick`): nav to box → `bend_lift` clip → grab at
+  `LIFT_GRAB_FRAC` → carry (weld holds the box; walking works normally) → `put_down` plays
+  `set_down` and releases. NOTE: the box adds 7 qpos at the END of `qpos` — controller joint
+  slices are explicit (`qpos[7:30]`), and the g1.xml keyframe carries the box pose.
+- **E-stop** — goal kind `estop` beats everything: clears `nav.target`, zeroes steering/forward,
+  forces the stand clip. "stop" alone remains the polite stop.
+- **Home** — `HOME=(0,0)` landmark; "go home / return to base".
+- **Signals** — `halt_sign`, `wave_in`, `point_left` synthesized skills; `point_at` reuses the
+  look_at turn-to-face then points.
+- **Obstacle avoidance** — `Navigator(obstacles=memory.known)`: repulsive steering for known
+  objects within 1.3 m ahead (skips flat markers and anything <0.4 m = self/carried box), slows
+  under 0.8 m, hard-stops forward under 0.45 m. Perception-driven: scanning improves routing.
+
 ## Deferred
 
 - **Memory persistence** (Voyager-adapted): disk-backed spatial store + episodic (goal, plan,

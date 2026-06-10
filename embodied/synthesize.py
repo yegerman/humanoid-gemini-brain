@@ -153,6 +153,91 @@ def make_celebrate(seconds: float = 3.0) -> str:
     return _save("celebrate", *_static(dof))
 
 
+def make_point_left(seconds: float = 3.0) -> str:
+    n = int(seconds * FPS)
+    dof = np.tile(DEFAULT, (n, 1))
+    for i in range(n):
+        a = min(1.0, i / (0.3 * n))
+        dof[i, L_SH_PITCH] = DEFAULT[L_SH_PITCH] + a * (-1.4 - DEFAULT[L_SH_PITCH])
+        dof[i, L_ELBOW] = DEFAULT[L_ELBOW] + a * (0.05 - DEFAULT[L_ELBOW])
+    return _save("point_left", *_static(dof))
+
+
+def make_halt_sign(seconds: float = 3.0) -> str:
+    """Industrial 'HALT' signal: right arm straight out front, raised, palm-forward stance."""
+    n = int(seconds * FPS)
+    dof = np.tile(DEFAULT, (n, 1))
+    for i in range(n):
+        a = min(1.0, i / (0.25 * n))
+        dof[i, R_SH_PITCH] = DEFAULT[R_SH_PITCH] + a * (-1.7 - DEFAULT[R_SH_PITCH])
+        dof[i, R_ELBOW] = DEFAULT[R_ELBOW] + a * (0.0 - DEFAULT[R_ELBOW])
+    return _save("halt_sign", *_static(dof))
+
+
+def make_wave_in(seconds: float = 3.5) -> str:
+    """Industrial 'come here / wave in' signal: arm forward, repeated elbow curls."""
+    n = int(seconds * FPS)
+    dof = np.tile(DEFAULT, (n, 1))
+    for i in range(n):
+        a = min(1.0, i / (0.2 * n))
+        dof[i, R_SH_PITCH] = DEFAULT[R_SH_PITCH] + a * (-1.2 - DEFAULT[R_SH_PITCH])
+        dof[i, R_ELBOW] = 0.7 + a * 0.5 * (0.5 - 0.5 * np.cos(2 * np.pi * 1.2 * i / FPS))
+    return _save("wave_in", *_static(dof))
+
+
+# Pick & carry phases (fractions of the clip): the Executor triggers grab/release at HOLD.
+LIFT_GRAB_FRAC = 0.45   # bend reached, hands at box height -> enable weld here
+LIFT_DONE_FRAC = 0.95
+
+
+def make_bend_lift(seconds: float = 4.0) -> str:
+    """Bend at the waist, reach both arms down-forward, then straighten holding arms out
+    front (carry pose). The weld 'grab' fires at LIFT_GRAB_FRAC of the clip."""
+    n = int(seconds * FPS)
+    dof = np.tile(DEFAULT, (n, 1))
+    for i in range(n):
+        ph = i / n
+        if ph < 0.4:                      # bend + reach down
+            a = ph / 0.4
+            waist, shp, elb = 0.55 * a, -0.5 * a, DEFAULT[R_ELBOW] + a * (0.25 - DEFAULT[R_ELBOW])
+        elif ph < 0.55:                   # hold at the box (grab window)
+            waist, shp, elb = 0.55, -0.5, 0.25
+        else:                             # straighten up into carry pose (arms forward)
+            a = (ph - 0.55) / 0.45
+            waist = 0.55 * (1 - a)
+            shp = -0.5 + a * (-0.9 - -0.5)
+            elb = 0.25 + a * (0.5 - 0.25)
+        dof[i, WAIST_PITCH] = waist
+        dof[i, R_SH_PITCH] = dof[i, L_SH_PITCH] = shp
+        dof[i, R_ELBOW] = dof[i, L_ELBOW] = elb
+    return _save("bend_lift", *_static(dof))
+
+
+def make_set_down(seconds: float = 4.0) -> str:
+    """From the normal STANDING pose (the robot stands while carrying — the weld holds the
+    box, not the arms), bend down and reach, release, straighten back to default."""
+    n = int(seconds * FPS)
+    dof = np.tile(DEFAULT, (n, 1))
+    for i in range(n):
+        ph = i / n
+        if ph < 0.4:                      # stand -> gentle bend + reach down
+            a = ph / 0.4
+            waist = 0.45 * a
+            shp = -0.45 * a
+            elb = DEFAULT[R_ELBOW] + a * (0.25 - DEFAULT[R_ELBOW])
+        elif ph < 0.55:                   # hold low (release window)
+            waist, shp, elb = 0.45, -0.45, 0.25
+        else:                             # straighten back to default
+            a = (ph - 0.55) / 0.45
+            waist = 0.45 * (1 - a)
+            shp = -0.45 * (1 - a)
+            elb = 0.25 + a * (DEFAULT[R_ELBOW] - 0.25)
+        dof[i, WAIST_PITCH] = waist
+        dof[i, R_SH_PITCH] = dof[i, L_SH_PITCH] = shp
+        dof[i, R_ELBOW] = dof[i, L_ELBOW] = elb
+    return _save("set_down", *_static(dof))
+
+
 def make_point_right(seconds: float = 3.0) -> str:
     n = int(seconds * FPS)
     dof = np.tile(DEFAULT, (n, 1))
@@ -238,6 +323,11 @@ def make_all() -> dict:
         "clap": make_clap(),
         "celebrate": make_celebrate(),
         "point_right": make_point_right(),
+        "point_left": make_point_left(),
+        "halt_sign": make_halt_sign(),
+        "wave_in": make_wave_in(),
+        "bend_lift": make_bend_lift(),
+        "set_down": make_set_down(),
     }
 
 

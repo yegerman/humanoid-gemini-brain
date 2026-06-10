@@ -28,9 +28,23 @@
     <geom name="prop_post"   type="cylinder" pos="4.4 1.0 0.35"  size="0.12 0.35"      material="prop_purple"/>
     <!-- A low step block beside the stage (toward future stair work). -->
     <geom name="prop_step"   type="box"      pos="2.5 2.3 0.08"  size="0.6 0.4 0.08"   material="prop_blue"/>
+    <!-- Carryable box (free body): the "pick & carry" payload. Grabbed via the disabled
+         weld below ("magnetic gripper" stand-in, toggled at runtime by GMTController.grab). -->
+    <body name="carry_box" pos="1.6 0.6 0.075">
+      <freejoint name="carry_box_free"/>
+      <geom name="carry_box_geom" type="box" size="0.06 0.06 0.06" mass="0.4"
+            rgba="0.10 0.75 0.80 1" friction="0.9 0.005 0.0001"/>
+    </body>
+
     <!-- Third-person chase camera that follows the robot. -->
     <camera name="chase" pos="-2.2 -2.6 1.7" xyaxes="0.76 -0.65 0 0.28 0.33 0.9" mode="trackcom"/>
     <!-- Wide overview for the planner to see robot + stage. -->
     <camera name="overview" pos="1.2 -4.2 2.4" xyaxes="0.96 0.27 0 -0.13 0.46 0.88" mode="fixed"/>
   </worldbody>
+
+  <equality>
+    <!-- "Magnetic gripper": disabled weld between the right hand and the carry box.
+         GMTController.grab(True) re-anchors the relative pose and activates it. -->
+    <weld name="grab" body1="right_rubber_hand" body2="carry_box" active="false"/>
+  </equality>
 </mujoco>

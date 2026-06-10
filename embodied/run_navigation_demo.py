@@ -46,7 +46,7 @@ import synthesize
 
 SKILL_MOTIONS = synthesize.make_all()  # {"stand":path, "raise_right_hand":path}
 
-_COLOR_WORDS = ("red", "orange", "yellow", "green", "blue", "purple")
+_COLOR_WORDS = ("red", "orange", "yellow", "green", "blue", "purple", "cyan")
 
 
 def jorge_reply(cmd: str, goal, plan, scene) -> str:
@@ -54,6 +54,16 @@ def jorge_reply(cmd: str, goal, plan, scene) -> str:
     caption + plan already computed), so he chats back in the terminal."""
     k = goal.kind
     cap = (scene.caption or "").replace("Onboard view:", "").replace("I see", "").strip().rstrip(".")
+    if k == "estop":
+        return "EMERGENCY STOP. All motion halted."
+    if k == "scan":
+        return "Scanning the area - I'll do a full turn and report everything I find."
+    if k == "pick_up":
+        return "On it - walking to the box to pick it up."
+    if k == "put_down":
+        return "Setting the box down here."
+    if k == "point_at":
+        return f"That way - pointing at the {goal.target_name}."
     if k == "look":
         return f"I see {cap}." if cap else "I don't see anything notable right now."
     if k == "look_at":
@@ -124,7 +134,40 @@ class Executor:
     def set(self, goal: Goal, plan: Plan) -> None:
         self.goal, self.plan = goal, plan
         self.turn_end = None
-        if goal.kind == "go_to" and goal.target_xy:
+        if goal.kind == "estop":
+            # SAFETY: kill every motion source immediately — nav target, steering, gait.
+            self.nav.target = None
+            self.nav.arrived = True
+            self.c.steer_yaw_rate = 0.0
+            self.c.fwd_scale = 0.0
+            self.c.set_motion(skill_motion("stand"), force=True)
+            self.plan.current = "EMERGENCY STOP - all motion halted"
+        elif goal.kind == "scan":
+            self.c.set_motion(self.nav.walk_motion)
+            self.c.fwd_scale = 0.12
+            self.c.steer_yaw_rate = 0.8
+            self._scan_end = self.c.counter + int((2 * 3.14159 / 0.8) / self.c.sim_dt)
+            self._scan_next = self.c.counter
+            self.plan.current = "scanning the area (360)"
+        elif goal.kind == "pick_up":
+            self._pick_phase = "nav"
+            box = self._box_xy()
+            if box is None:
+                self.plan.current = "I don't know where the box is"
+                self._pick_phase = None
+            else:
+                self.nav.go_to(*box)
+                self.plan.current = "walking to the box"
+        elif goal.kind == "put_down":
+            self.c.steer_yaw_rate = 0.0
+            self.c.fwd_scale = 0.0
+            self.c.set_motion(skill_motion("set_down"), force=True)
+            self._release_at = self.c.counter + int(0.5 * 4.0 / self.c.sim_dt)
+            self._put_done = self.c.counter + int(4.0 / self.c.sim_dt)
+        elif goal.kind == "point_at":
+            self._begin_look_at(goal)          # reuse: recall + turn to face it
+            self._point_pending = True
+        elif goal.kind == "go_to" and goal.target_xy:
             self.nav.go_to(*goal.target_xy)
         elif goal.kind == "look_at":
             self._begin_look_at(goal)
@@ -213,8 +256,67 @@ class Executor:
             # single stable entry (the shape guess flips frame-to-frame and would fragment it).
             key = _color_key(label)
             tx, ty = self._estimate_target(pr, d)
+            # Reject estimates landing on/inside the robot (floor patches, own shadow, the
+            # box in hand) — they'd poison memory and the obstacle avoidance.
+            import numpy as _np
+            if float(_np.linalg.norm(_np.array([tx, ty]) - pr.pos[:2])) < 0.5:
+                continue
             self.memory.update(key, (tx, ty), self.c.counter)
             self.scene.targets[key] = (tx, ty)
+
+    def _box_xy(self):
+        """Carry-box position: prefer memory (perception-driven), else ground truth from sim."""
+        rec = self.memory.recall("cyan box") if self.memory else None
+        if rec is not None:
+            return rec[1]
+        try:
+            import mujoco
+            bid = mujoco.mj_name2id(self.c.model, mujoco.mjtObj.mjOBJ_BODY, "carry_box")
+            return float(self.c.data.xpos[bid][0]), float(self.c.data.xpos[bid][1])
+        except Exception:
+            return None
+
+    def _inventory_report(self) -> str:
+        known = self.memory.known() if self.memory else {}
+        if not known:
+            return "Inventory: nothing logged yet."
+        items = ", ".join(f"{k} at ({v[0]:.1f},{v[1]:.1f})" for k, v in known.items())
+        return f"Inventory: {len(known)} items. {items}."
+
+    def _tick_pick(self) -> str:
+        """Pick-up state machine: nav to the box -> bend_lift -> weld grab -> carrying."""
+        import numpy as np
+        phase = getattr(self, "_pick_phase", None)
+        if phase == "nav":
+            st = self.nav.update()
+            self.plan.current = st["status"]
+            if st["arrived"]:
+                self._pick_phase = "lift"
+                self.c.steer_yaw_rate = 0.0
+                self.c.fwd_scale = 0.0
+                self.c.set_motion(skill_motion("bend_lift"), force=True)
+                self._grab_at = self.c.counter + int(synthesize.LIFT_GRAB_FRAC * 4.0 / self.c.sim_dt)
+                self._lift_done = self.c.counter + int(4.0 / self.c.sim_dt)
+                self.plan.current = "bending down to lift the box"
+        elif phase == "lift":
+            if getattr(self, "_grab_at", None) is not None and self.c.counter >= self._grab_at:
+                self._grab_at = None
+                box = self._box_xy()
+                pr = self.c.get_proprio()
+                near = box is not None and float(np.linalg.norm(np.array(box) - pr.pos[:2])) < 0.9
+                if near and self.c.grab(True):
+                    self.plan.current = "grabbed the box"
+                else:
+                    self.plan.current = "couldn't reach the box - it's too far"
+                    self._pick_phase = None
+            if getattr(self, "_lift_done", None) is not None and self.c.counter >= self._lift_done:
+                self._lift_done = None
+                if self._pick_phase == "lift":
+                    self._pick_phase = "carrying"
+                    self.c.set_motion(skill_motion("stand"))
+                    self.plan.current = "carrying the box - tell me where to take it"
+                    print("  Jorge: Got it. Where to?")
+        return self.plan.current
 
     def _begin_look_at(self, goal: Goal) -> None:
         """Recall a remembered object and turn in place to face it, then look (Voyager recall:
@@ -315,6 +417,44 @@ class Executor:
         return self.plan.current
 
     def tick(self) -> str:
+        if self.goal.kind == "estop":
+            return self.plan.current
+        if self.goal.kind == "scan":
+            if self.c.counter >= getattr(self, "_scan_end", 0):
+                self.c.steer_yaw_rate = 0.0
+                self.c.fwd_scale = 0.0
+                self.c.set_motion(skill_motion("stand"))
+                report = self._inventory_report()
+                if self.plan.current != report:
+                    print("  Jorge:", report)
+                self.plan.current = report
+                return report
+            if self.c.counter >= getattr(self, "_scan_next", 0):
+                self._scan_next = self.c.counter + int(0.5 / self.c.sim_dt)
+                self._learn(self.vision.quick_look(self.percept.render_ego()))
+                self.plan.current = f"scanning... {len(self.memory)} objects logged"
+            return self.plan.current
+        if self.goal.kind == "pick_up":
+            return self._tick_pick()
+        if self.goal.kind == "put_down":
+            if getattr(self, "_release_at", None) is not None and self.c.counter >= self._release_at:
+                self.c.grab(False)
+                self._release_at = None
+                self.plan.current = "released the box"
+            if getattr(self, "_put_done", None) is not None and self.c.counter >= self._put_done:
+                self.c.set_motion(skill_motion("stand"))
+                self._put_done = None
+                self.plan.current = "box set down"
+            return self.plan.current
+        if self.goal.kind == "point_at":
+            if self.turn_end is not None and self.c.counter >= self.turn_end:
+                self.turn_end = None
+                self.c.steer_yaw_rate = 0.0
+                self.c.fwd_scale = 0.0
+                self.c.set_motion(skill_motion("point_right"), force=True)
+                self._point_pending = False
+                self.plan.current = f"pointing at the {self.goal.target_name}"
+            return self.plan.current
         if self.goal.kind == "go_to":
             self.plan.current = self.nav.update()["status"]
             return self.plan.current
@@ -356,9 +496,10 @@ def build(width: int = 1280, height: int = 720):
     percept = Perception(c, bus, camera="chase", width=width, height=height)
     brain = Brain()
     vision = VisionBrain()
-    nav = Navigator(c)
     scene = SceneView(caption="(robot's onboard view)", targets={"stage center": (2.5, 0.0)})
     memory = SpatialMemory()   # one shared memory: Executor writes detections, Brain reads for grounding
+    # Navigator avoids whatever Jorge remembers (perception-driven obstacle avoidance).
+    nav = Navigator(c, obstacles=memory.known)
     ex = Executor(c, nav, vision, percept, scene, memory)
     return bus, c, percept, brain, nav, ex, scene, memory
 

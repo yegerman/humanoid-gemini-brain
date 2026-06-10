@@ -37,9 +37,12 @@ world x,y), and a caption. Decide ONE action for the user's command. Be GROUNDED
   If the target hasn't been seen, use "go_to_visual" (go find it).
 - For a gesture/motion, pick the CLOSEST existing skill. If NONE fits the request, propose a new
   skill via "new_skill" (a short name + a one-line description of the arm/waist motion). Never refuse.
+- Industry tasks: "scan" = 360 inventory sweep + report; "pick_up" = fetch the cyan carry box;
+  "put_down" = set the carried box down; "point_at" = face a known object and point;
+  "estop" = EMERGENCY STOP, halt everything (use for any urgent stop request).
 - "idle" only for empty input or a pure greeting.
 Return ONLY JSON:
-{"kind":"go_to|go_to_visual|look|look_at|skill|idle",
+{"kind":"go_to|go_to_visual|look|look_at|skill|scan|pick_up|put_down|point_at|estop|idle",
  "target":"<known label or stage center>"|null,
  "skill":"<one existing skill>"|null,
  "new_skill":{"name":"<snake>","description":"<what the arms/waist do>"}|null,

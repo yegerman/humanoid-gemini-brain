@@ -18,11 +18,12 @@ def _wrap(a: float) -> float:
 
 class Navigator:
     def __init__(self, controller, walk_motion: str = "basic_walk.pkl",
-                 arrive_tol: float = 0.7, kp: float = 1.6) -> None:
+                 arrive_tol: float = 0.7, kp: float = 1.6, obstacles=None) -> None:
         self.c = controller
         self.walk_motion = walk_motion
         self.arrive_tol = arrive_tol
         self.kp = kp
+        self.obstacles = obstacles      # callable -> {label: (x, y)} of known objects, or None
         self._stand = make_stand()
         self.target = None
         self.arrived = False
@@ -67,6 +68,32 @@ class Navigator:
 
         bearing = np.arctan2(d[1], d[0])
         err = _wrap(bearing - travel)
+
+        # Obstacle avoidance: repulsive steering away from known objects in the path ahead,
+        # slow when close, hard-stop forward rather than stumbling into anything.
+        fwd = 1.0
+        if self.obstacles is not None:
+            R = 1.3                                   # influence radius
+            for label, (ox, oy) in dict(self.obstacles()).items():
+                if any(w in label for w in ("red", "stage", "home", "circle")):
+                    continue                           # flat / walkable markers
+                ov = np.array([ox, oy]) - xy
+                d_o = float(np.linalg.norm(ov))
+                if d_o < 0.4 or d_o > R:
+                    continue                           # <0.4 m = self / the carried box, not a wall
+                if np.linalg.norm(np.array([ox, oy]) - self.target) < self.arrive_tol + 0.15:
+                    continue                           # the obstacle IS (at) the destination
+                ang = _wrap(float(np.arctan2(ov[1], ov[0])) - travel)
+                if abs(ang) > 1.2:
+                    continue                           # behind / far to the side
+                side = np.sign(ang) if abs(ang) > 1e-3 else (np.sign(err) or 1.0)
+                err += float(-side * 1.1 * (1.0 / d_o - 1.0 / R))   # steer away
+                if abs(ang) < 0.7:                     # roughly dead ahead
+                    if d_o < 0.45:
+                        fwd = 0.0                      # stop, keep turning until clear
+                    elif d_o < 0.8:
+                        fwd = min(fwd, 0.6)            # ease off while skirting it
+
         self.c.steer_yaw_rate = float(np.clip(self.kp * err, -1.5, 1.5))
-        self.c.fwd_scale = 1.0
+        self.c.fwd_scale = fwd
         return {"dist": dist, "arrived": False, "status": f"walking to target ({dist:.1f}m)"}

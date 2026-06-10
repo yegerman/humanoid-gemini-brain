@@ -129,13 +129,16 @@ class GMTController:
         gz_upright = abs(e[0]) < 0.7 and abs(e[1]) < 0.7
         return Proprio(pos=d.qpos[0:3].copy(), quat=quat, yaw=float(e[2]),
                        height=float(d.qpos[2]), upright=bool(gz_upright and d.qpos[2] > 0.5),
-                       dof_pos=d.qpos[-self.num_dofs:].copy())
+                       dof_pos=d.qpos[7:7 + self.num_dofs].copy())
 
     # --- simulation -------------------------------------------------------
     def step(self) -> None:
         d = self.data
-        dof_pos = d.qpos.astype(np.float32)[-self.num_dofs:]
-        dof_vel = d.qvel.astype(np.float32)[-self.num_dofs:]
+        # Robot joints live right after the floating root in qpos/qvel. Use EXPLICIT slices:
+        # the scene also contains the free-joint carry_box, whose 7/6 values sit at the END,
+        # so negative indexing would read the box instead of the joints.
+        dof_pos = d.qpos.astype(np.float32)[7:7 + self.num_dofs]
+        dof_vel = d.qvel.astype(np.float32)[6:6 + self.num_dofs]
         if self.counter % self.sim_decimation == 0:
             ct = (self.counter - getattr(self, "motion_t0", 0)) // self.sim_decimation
             mimic = self._get_mimic_obs(max(ct, 0))
@@ -183,6 +186,30 @@ class GMTController:
         self.motion_t0 = self.counter   # restart the clip from this matched standing pose
         if verbose:
             print("  [controller] recovered to a stable standing pose.")
+
+    def grab(self, on: bool) -> bool:
+        """Toggle the 'magnetic gripper' weld between the right hand and carry_box.
+        On enable, re-anchor the weld to the CURRENT hand->box relative pose so the box
+        attaches where it is (no snap). Returns False if the scene has no grab weld."""
+        eq_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_EQUALITY, "grab")
+        if eq_id < 0:
+            return False
+        if on:
+            b1 = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "right_rubber_hand")
+            b2 = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "carry_box")
+            p1, q1 = self.data.xpos[b1].copy(), self.data.xquat[b1].copy()
+            p2, q2 = self.data.xpos[b2].copy(), self.data.xquat[b2].copy()
+            q1inv = np.zeros(4); mujoco.mju_negQuat(q1inv, q1)
+            relpos = np.zeros(3); mujoco.mju_rotVecQuat(relpos, p2 - p1, q1inv)
+            relquat = np.zeros(4); mujoco.mju_mulQuat(relquat, q1inv, q2)
+            self.model.eq_data[eq_id][:] = 0.0
+            self.model.eq_data[eq_id][3:6] = relpos
+            self.model.eq_data[eq_id][6:10] = relquat
+            self.model.eq_data[eq_id][10] = 1.0   # torquescale
+            self.data.eq_active[eq_id] = 1
+        else:
+            self.data.eq_active[eq_id] = 0
+        return True
 
     def _recover(self) -> None:
         """Physics went unstable (NaN/Inf QACC) — recover so a bad motion transition

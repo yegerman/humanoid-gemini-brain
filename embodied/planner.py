@@ -29,14 +29,15 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 
-# Landmarks (walk targets) — the red stage disk at (2.5, 0).
+# Landmarks (walk targets) — the red stage disk at (2.5, 0); home = the spawn point.
 STAGE = (2.5, 0.0)
+HOME = (0.0, 0.0)
 LANDMARK_WORDS = ["stage", "center", "centre", "disk", "disc", "circle", "podium", "mark", "spot"]
 
-# All available skills (synthesized motions + steering turns + recover-to-stand).
+# All available skills (synthesized motions + steering turns + recover-to-stand + signals).
 ALL_SKILLS = ["raise_right_hand", "raise_left_hand", "raise_both_hands", "wave_right",
               "turn_left", "turn_right", "bow", "nod", "clap", "celebrate",
-              "point_right", "stand", "stand_up"]
+              "point_right", "point_left", "halt_sign", "wave_in", "stand", "stand_up"]
 
 SYSTEM = """You translate a command for a humanoid robot into ONE JSON object.
 You are GROUNDED: you may ONLY use the skills and known objects listed in the context.
@@ -114,6 +115,48 @@ class Brain:
         circle_word = _fuzzy_in(toks, "circle", "disk", "disc", "red")
         find_word = _fuzzy_in(toks, "find", "search", "locate", "spot")
         go_verb0 = _fuzzy_in(toks, "go", "walk", "move", "head", "navigate", "approach", "reach", "come")
+
+        # SAFETY FIRST — emergency stop: halt everything (skills, nav, steering) immediately.
+        if _fuzzy_in(toks, "emergency", "estop") or ("emergency" in c) or \
+           (_fuzzy_in(toks, "stop") and _fuzzy_in(toks, "now", "all", "everything")):
+            return {"kind": "estop", "target": None, "skill": None,
+                    "reasoning": "EMERGENCY STOP - halt all motion"}
+
+        # pick & carry (before the raise/hand branch: 'pick UP' must not read as raise-arm)
+        if _fuzzy_in(toks, "pick", "grab", "fetch") or \
+           (_fuzzy_in(toks, "lift", "carry") and _fuzzy_in(toks, "box", "cube", "object", "payload", "it")):
+            return {"kind": "pick_up", "target": "cyan box", "skill": None,
+                    "reasoning": "pick up the carry box"}
+        if (_fuzzy_in(toks, "put", "set", "drop", "place", "release") and
+                _fuzzy_in(toks, "down", "it", "box", "here", "floor")):
+            return {"kind": "put_down", "target": None, "skill": None,
+                    "reasoning": "set the carried box down"}
+
+        # inventory scan: 360 sweep + structured report of everything seen
+        if _fuzzy_in(toks, "scan", "inventory", "stocktake") or \
+           ("take stock" in c) or (_fuzzy_in(toks, "report") and _fuzzy_in(toks, "area", "objects", "stock", "what")):
+            return {"kind": "scan", "target": None, "skill": None,
+                    "reasoning": "scan the area and report the inventory"}
+
+        # return home / to base / dock -> walk back to the spawn point
+        if _fuzzy_in(toks, "home", "base", "dock", "charging"):
+            return {"kind": "go_to", "target": "home", "skill": None,
+                    "reasoning": "return to the home position"}
+
+        # industrial hand signals
+        if _fuzzy_in(toks, "halt") and not _fuzzy_in(toks, "emergency"):
+            return _skill("halt_sign", "show the HALT hand signal")
+        if _fuzzy_in(toks, "wave") and _fuzzy_in(toks, "in", "them", "here", "come"):
+            return _skill("wave_in", "wave them in (come-here signal)")
+
+        # "point at <remembered object>" -> face it and point
+        if _fuzzy_in(toks, "point") and _fuzzy_in(toks, "at", "to", "toward", "towards"):
+            obj = self._match_known(command, known)
+            if obj:
+                return {"kind": "point_at", "target": obj, "skill": None,
+                        "reasoning": f"turn to face the {obj} and point at it"}
+        if _fuzzy_in(toks, "point") and _fuzzy_in(toks, "left"):
+            return _skill("point_left", "point left")
 
         # stand up / get up / recover -> the recover-to-stand skill (before bare 'stand')
         if _fuzzy_in(toks, "getup", "recover") or \
@@ -270,7 +313,26 @@ class Brain:
         kind = data.get("kind", "idle")
         reasoning = data.get("reasoning", "")
         target = data.get("target")
-        if kind == "look":
+        if kind == "estop":
+            goal = Goal(kind="estop", text=command)
+            plan = Plan(steps=["halt all motion"], reasoning=reasoning, current="EMERGENCY STOP")
+        elif kind == "scan":
+            goal = Goal(kind="scan", text=command)
+            plan = Plan(steps=["rotate 360", "log every object + position", "report inventory"],
+                        reasoning=reasoning, current="scanning the area")
+        elif kind == "pick_up":
+            goal = Goal(kind="pick_up", target_name=target or "cyan box", text=command)
+            plan = Plan(steps=["walk to the box", "bend and lift", "carry"],
+                        reasoning=reasoning, current="going to pick up the box")
+        elif kind == "put_down":
+            goal = Goal(kind="put_down", text=command)
+            plan = Plan(steps=["bend down", "release", "stand"],
+                        reasoning=reasoning, current="setting the box down")
+        elif kind == "point_at":
+            goal = Goal(kind="point_at", target_name=target, text=command)
+            plan = Plan(steps=[f"face the {target}", "point at it"],
+                        reasoning=reasoning, current=f"pointing at {target}")
+        elif kind == "look":
             goal = Goal(kind="look", text=command)
             plan = Plan(steps=["look through onboard camera", "describe scene"],
                         reasoning=reasoning or "describe what I see", current="looking")
@@ -283,8 +345,12 @@ class Brain:
             plan = Plan(steps=[f"find {target or 'target'}", "steer toward it", "walk", "stop when close"],
                         reasoning=reasoning, current=f"searching for {target or 'the target'}")
         elif kind == "go_to":
-            # landmark -> STAGE coords; named known object -> recall its remembered position.
-            if target and target not in ("stage center", "stage", "center", "centre") and target in known:
+            # landmark -> STAGE/HOME coords; named known object -> recall its remembered position.
+            if target in ("home", "base", "dock"):
+                goal = Goal(kind="go_to", target_xy=HOME, target_name="home", text=command)
+                plan = Plan(steps=["walk back to the home position", "stop on arrival"],
+                            reasoning=reasoning, current="returning home")
+            elif target and target not in ("stage center", "stage", "center", "centre") and target in known:
                 goal = Goal(kind="go_to", target_xy=known[target], target_name=target, text=command)
                 plan = Plan(steps=[f"recall {target}", "walk there", "stop on arrival"],
                             reasoning=reasoning, current=f"navigating to {target}")
