@@ -293,11 +293,11 @@
     <light pos="0 0 1000" castshadow="true" />
   </worldbody>
 
-  <!-- NOTE: the trailing 7 qpos values are the free-joint carry_box added by scene_stage.xml
-       (pos + quat). This file is always loaded via scene_stage.xml in the embodied demos;
-       loading g1.xml standalone would need those 7 values removed. -->
+  <!-- NOTE: the trailing 21 qpos values are the free-joint boxes added by scene_stage.xml
+       (carry_box, box_magenta, box_cyan2 — pos + quat each). This file is always loaded via
+       scene_stage.xml in the embodied demos; standalone g1.xml would need them removed. -->
   <keyframe>
     <key name="home"
-      qpos="0 0 1.0 1 0 0 0 -0.2 0 0 0.4 -0.2 0 -0.2 0 0 0.4 -0.2 0 0 0 0 0 0.4 0 1.2 0 -0.4 0 1.2 1.6 0.6 0.075 1 0 0 0" />
+      qpos="0 0 1.0 1 0 0 0 -0.2 0 0 0.4 -0.2 0 -0.2 0 0 0.4 -0.2 0 0 0 0 0 0.4 0 1.2 0 -0.4 0 1.2 1.6 0.6 0.075 1 0 0 0 0.9 -0.5 0.09 1 0 0 0 2.1 -0.9 0.09 1 0 0 0" />
   </keyframe>
 </mujoco>

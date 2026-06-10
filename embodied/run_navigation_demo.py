@@ -46,7 +46,7 @@ import synthesize
 
 SKILL_MOTIONS = synthesize.make_all()  # {"stand":path, "raise_right_hand":path}
 
-_COLOR_WORDS = ("red", "orange", "yellow", "green", "blue", "purple", "cyan")
+_COLOR_WORDS = ("red", "orange", "yellow", "green", "blue", "purple", "cyan", "magenta")
 
 
 def jorge_reply(cmd: str, goal, plan, scene) -> str:
@@ -151,7 +151,7 @@ class Executor:
             self.plan.current = "scanning the area (360)"
         elif goal.kind == "pick_up":
             self._pick_phase = "nav"
-            box = self._box_xy()
+            box = self._box_xy(goal.target_name)
             if box is None:
                 self.plan.current = "I don't know where the box is"
                 self._pick_phase = None
@@ -264,17 +264,30 @@ class Executor:
             self.memory.update(key, (tx, ty), self.c.counter)
             self.scene.targets[key] = (tx, ty)
 
-    def _box_xy(self):
-        """Carry-box position: prefer memory (perception-driven), else ground truth from sim."""
-        rec = self.memory.recall("cyan box") if self.memory else None
-        if rec is not None:
-            return rec[1]
-        try:
-            import mujoco
-            bid = mujoco.mj_name2id(self.c.model, mujoco.mjtObj.mjOBJ_BODY, "carry_box")
-            return float(self.c.data.xpos[bid][0]), float(self.c.data.xpos[bid][1])
-        except Exception:
-            return None
+    _BOXES = {"carry_box": "cyan", "box_magenta": "magenta", "box_cyan2": "cyan"}
+
+    def _box_xy(self, name: str | None = None):
+        """Position of the liftable box to fetch: a color named in the command wins, else the
+        box NEAREST the robot (the easiest lift)."""
+        import numpy as np
+        import mujoco
+        want = None
+        for color in set(self._BOXES.values()):
+            if name and color in name.lower():
+                want = color
+        pr = self.c.get_proprio()
+        best, best_d = None, 1e9
+        for body, color in self._BOXES.items():
+            if want and color != want:
+                continue
+            bid = mujoco.mj_name2id(self.c.model, mujoco.mjtObj.mjOBJ_BODY, body)
+            if bid < 0:
+                continue
+            xy = (float(self.c.data.xpos[bid][0]), float(self.c.data.xpos[bid][1]))
+            d = float(np.linalg.norm(np.array(xy) - pr.pos[:2]))
+            if d < best_d:
+                best, best_d = xy, d
+        return best
 
     def _inventory_report(self) -> str:
         known = self.memory.known() if self.memory else {}
@@ -301,7 +314,7 @@ class Executor:
         elif phase == "lift":
             if getattr(self, "_grab_at", None) is not None and self.c.counter >= self._grab_at:
                 self._grab_at = None
-                box = self._box_xy()
+                box = self._box_xy(self.goal.target_name)
                 pr = self.c.get_proprio()
                 near = box is not None and float(np.linalg.norm(np.array(box) - pr.pos[:2])) < 0.9
                 if near and self.c.grab(True):

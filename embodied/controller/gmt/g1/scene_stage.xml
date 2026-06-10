@@ -35,6 +35,17 @@
       <geom name="carry_box_geom" type="box" size="0.06 0.06 0.06" mass="0.4"
             rgba="0.10 0.75 0.80 1" friction="0.9 0.005 0.0001"/>
     </body>
+    <!-- Two more liftable boxes: bigger + lighter = easier to grab. -->
+    <body name="box_magenta" pos="0.9 -0.5 0.09">
+      <freejoint name="box_magenta_free"/>
+      <geom name="box_magenta_geom" type="box" size="0.075 0.075 0.075" mass="0.25"
+            rgba="0.90 0.15 0.65 1" friction="0.9 0.005 0.0001"/>
+    </body>
+    <body name="box_cyan2" pos="2.1 -0.9 0.09">
+      <freejoint name="box_cyan2_free"/>
+      <geom name="box_cyan2_geom" type="box" size="0.075 0.075 0.075" mass="0.25"
+            rgba="0.15 0.85 0.90 1" friction="0.9 0.005 0.0001"/>
+    </body>
 
     <!-- Third-person chase camera that follows the robot. -->
     <camera name="chase" pos="-2.2 -2.6 1.7" xyaxes="0.76 -0.65 0 0.28 0.33 0.9" mode="trackcom"/>
@@ -43,8 +54,10 @@
   </worldbody>
 
   <equality>
-    <!-- "Magnetic gripper": disabled weld between the right hand and the carry box.
-         GMTController.grab(True) re-anchors the relative pose and activates it. -->
+    <!-- "Magnetic gripper": disabled welds between the right hand and each liftable box.
+         GMTController.grab(True) enables the weld of the box NEAREST the hand. -->
     <weld name="grab" body1="right_rubber_hand" body2="carry_box" active="false"/>
+    <weld name="grab_magenta" body1="right_rubber_hand" body2="box_magenta" active="false"/>
+    <weld name="grab_cyan2" body1="right_rubber_hand" body2="box_cyan2" active="false"/>
   </equality>
 </mujoco>

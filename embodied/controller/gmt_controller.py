@@ -187,28 +187,38 @@ class GMTController:
         if verbose:
             print("  [controller] recovered to a stable standing pose.")
 
+    def _grab_welds(self) -> list[tuple[int, int]]:
+        """All 'magnetic gripper' welds: (eq_id, body2_id) for equality names starting 'grab'."""
+        out = []
+        for eq_id in range(self.model.neq):
+            name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_EQUALITY, eq_id)
+            if name and name.startswith("grab"):
+                out.append((eq_id, int(self.model.eq_obj2id[eq_id])))
+        return out
+
     def grab(self, on: bool) -> bool:
-        """Toggle the 'magnetic gripper' weld between the right hand and carry_box.
-        On enable, re-anchor the weld to the CURRENT hand->box relative pose so the box
-        attaches where it is (no snap). Returns False if the scene has no grab weld."""
-        eq_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_EQUALITY, "grab")
-        if eq_id < 0:
+        """Toggle the 'magnetic gripper'. On enable, weld the box NEAREST the right hand,
+        re-anchored to the CURRENT hand->box relative pose so it attaches where it is (no
+        snap). On disable, release every grab weld. Returns False if nothing was grabbable."""
+        welds = self._grab_welds()
+        if not welds:
             return False
-        if on:
-            b1 = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "right_rubber_hand")
-            b2 = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "carry_box")
-            p1, q1 = self.data.xpos[b1].copy(), self.data.xquat[b1].copy()
-            p2, q2 = self.data.xpos[b2].copy(), self.data.xquat[b2].copy()
-            q1inv = np.zeros(4); mujoco.mju_negQuat(q1inv, q1)
-            relpos = np.zeros(3); mujoco.mju_rotVecQuat(relpos, p2 - p1, q1inv)
-            relquat = np.zeros(4); mujoco.mju_mulQuat(relquat, q1inv, q2)
-            self.model.eq_data[eq_id][:] = 0.0
-            self.model.eq_data[eq_id][3:6] = relpos
-            self.model.eq_data[eq_id][6:10] = relquat
-            self.model.eq_data[eq_id][10] = 1.0   # torquescale
-            self.data.eq_active[eq_id] = 1
-        else:
-            self.data.eq_active[eq_id] = 0
+        if not on:
+            for eq_id, _ in welds:
+                self.data.eq_active[eq_id] = 0
+            return True
+        b1 = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "right_rubber_hand")
+        p1, q1 = self.data.xpos[b1].copy(), self.data.xquat[b1].copy()
+        eq_id, b2 = min(welds, key=lambda w: np.linalg.norm(self.data.xpos[w[1]] - p1))
+        p2, q2 = self.data.xpos[b2].copy(), self.data.xquat[b2].copy()
+        q1inv = np.zeros(4); mujoco.mju_negQuat(q1inv, q1)
+        relpos = np.zeros(3); mujoco.mju_rotVecQuat(relpos, p2 - p1, q1inv)
+        relquat = np.zeros(4); mujoco.mju_mulQuat(relquat, q1inv, q2)
+        self.model.eq_data[eq_id][:] = 0.0
+        self.model.eq_data[eq_id][3:6] = relpos
+        self.model.eq_data[eq_id][6:10] = relquat
+        self.model.eq_data[eq_id][10] = 1.0   # torquescale
+        self.data.eq_active[eq_id] = 1
         return True
 
     def _recover(self) -> None:

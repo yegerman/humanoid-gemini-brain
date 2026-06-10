@@ -125,8 +125,10 @@ class Brain:
         # pick & carry (before the raise/hand branch: 'pick UP' must not read as raise-arm)
         if _fuzzy_in(toks, "pick", "grab", "fetch") or \
            (_fuzzy_in(toks, "lift", "carry") and _fuzzy_in(toks, "box", "cube", "object", "payload", "it")):
-            return {"kind": "pick_up", "target": "cyan box", "skill": None,
-                    "reasoning": "pick up the carry box"}
+            box = "magenta box" if _fuzzy_in(toks, "magenta", "pink") else \
+                  ("cyan box" if _fuzzy_in(toks, "cyan") else "box")  # bare -> nearest box
+            return {"kind": "pick_up", "target": box, "skill": None,
+                    "reasoning": f"pick up the {box}"}
         if (_fuzzy_in(toks, "put", "set", "drop", "place", "release") and
                 _fuzzy_in(toks, "down", "it", "box", "here", "floor")):
             return {"kind": "put_down", "target": None, "skill": None,
@@ -321,7 +323,7 @@ class Brain:
             plan = Plan(steps=["rotate 360", "log every object + position", "report inventory"],
                         reasoning=reasoning, current="scanning the area")
         elif kind == "pick_up":
-            goal = Goal(kind="pick_up", target_name=target or "cyan box", text=command)
+            goal = Goal(kind="pick_up", target_name=target or "box", text=command)
             plan = Plan(steps=["walk to the box", "bend and lift", "carry"],
                         reasoning=reasoning, current="going to pick up the box")
         elif kind == "put_down":

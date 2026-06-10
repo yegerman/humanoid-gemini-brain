@@ -63,7 +63,7 @@ a window. (Optional safety cap: `--seconds 120`.)
 | Gestures / skills | "raise your right hand", "wave", "bow", "nod", "clap", "celebrate", "point", "turn left/right" | Performs the closest whole-body skill. |
 | Stand up / recover | "get up", "stand up", "recover" | Resets to a stable standing pose (recover-to-stand). |
 | **Inventory scan** | "scan the area", "take stock" | 360° sweep, logs every object, then reports: "Inventory: 7 items. red at (2.5,0.0), …". |
-| **Pick & carry** | "pick up the box" → "take it to the stage" → "put it down" | Walks to the cyan box, bend-lifts it (weld "magnetic gripper"), carries it anywhere, sets it down. |
+| **Pick & carry** | "pick up the box" → "take it to the stage" → "put it down" | Walks to the **nearest liftable box**, bend-lifts it (weld "magnetic gripper"), carries it anywhere, sets it down. Three boxes exist: magenta at (0.9,−0.5), cyan at (1.6,0.6) and (2.1,−0.9); name a color ("pick up the magenta box") to choose. |
 | **Emergency stop** | "emergency stop", "estop" | Instantly halts ALL motion — nav target cleared, steering zeroed. |
 | **Return home** | "go home", "return to base" | Walks back to the spawn point (0,0). |
 | **Hand signals** | "halt sign", "wave them in", "point left", "point at the green sphere" | Industrial signals; point-at turns to face a remembered object and points. |

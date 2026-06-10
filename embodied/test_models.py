@@ -163,7 +163,12 @@ def test_industry() -> bool:
     import run_navigation_demo as base
     bus, c, percept, brain, nav, ex, scene, memory = base.build()
     brain._client = None    # deterministic offline routing
-    bid = mujoco.mj_name2id(c.model, mujoco.mjtObj.mjOBJ_BODY, "carry_box")
+    box_ids = [mujoco.mj_name2id(c.model, mujoco.mjtObj.mjOBJ_BODY, n)
+               for n in ("carry_box", "box_magenta", "box_cyan2")]
+
+    def lifted_box():
+        """(body_id, z) of the highest liftable box — whichever one Jorge grabbed."""
+        return max(((b, float(c.data.xpos[b][2])) for b in box_ids), key=lambda t: t[1])
 
     def run(cmd, secs, stop_carrying=False, track_crate=False):
         g, p = brain.plan(cmd, scene, memory)
@@ -188,9 +193,10 @@ def test_industry() -> bool:
     print(f"  [industry] scan: {len(memory)} objects, report ok={ok_scan}")
     ok &= ok_scan
 
-    # (b) pick & carry & put down
+    # (b) pick & carry & put down (whichever box was nearest)
     run("pick up the box", 25.0, stop_carrying=True)
-    lifted = float(c.data.xpos[bid][2]) > 0.3 and c.get_proprio().upright
+    bid, z = lifted_box()
+    lifted = z > 0.3 and c.get_proprio().upright
     run("go to the center of the stage", 12.0)
     carried = float(np.linalg.norm(c.data.xpos[bid][:2] - c.get_proprio().pos[:2])) < 0.8
     run("put it down", 5.0)

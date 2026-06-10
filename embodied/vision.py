@@ -32,7 +32,8 @@ COLOR_RANGES = {
     "green": [((36, 70, 50), (84, 255, 255))],
     "cyan": [((85, 120, 80), (97, 255, 255))],    # the carry box
     "blue": [((98, 130, 60), (130, 255, 255))],   # high S/V so the gray-blue floor tiles don't match
-    "purple": [((131, 60, 50), (167, 255, 255))],
+    "purple": [((131, 60, 50), (152, 255, 255))],
+    "magenta": [((153, 80, 70), (167, 255, 255))],   # the magenta carry box
 }
 MAX_BLOB_FRAC = 0.40   # reject blobs bigger than this fraction of the frame (floor/walls/background)
 
@@ -175,8 +176,8 @@ class VisionBrain:
     def _guess_shape(color: str, bw: int, bh: int) -> str:
         if color == "red":
             return "circle"          # the stage disk
-        if color == "cyan":
-            return "box"             # the carry box
+        if color in ("cyan", "magenta"):
+            return "box"             # the carry boxes
         aspect = bw / max(1, bh)
         if aspect < 0.7:
             return "pillar"          # tall and narrow
