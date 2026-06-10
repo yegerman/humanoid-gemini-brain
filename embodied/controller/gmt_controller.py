@@ -101,6 +101,7 @@ class GMTController:
         for _ in range(self.history_len):
             self.proprio_history.append(np.zeros(self.n_proprio))
 
+        self._motion_cache: dict[str, MotionLib] = {}  # path -> loaded lib (load once per clip)
         self.set_motion(motion)
 
     # --- brain-facing API -------------------------------------------------
@@ -110,7 +111,14 @@ class GMTController:
         if not force and getattr(self, "_motion_path", None) == path:
             return  # already tracking this motion; avoid redundant reload
         self._motion_path = path
-        self._motion_lib = MotionLib(path, self.device)
+        # Cache loaded clips: unpickle + tensor conversion + smoothing happen once per file,
+        # so switching motions (walk<->stand<->gesture, every command) is an instant dict hit
+        # instead of a main-thread reload that stalls the sim/render.
+        lib = self._motion_cache.get(path)
+        if lib is None:
+            lib = MotionLib(path, self.device)
+            self._motion_cache[path] = lib
+        self._motion_lib = lib
         if reset_time:
             self.motion_t0 = self.counter
 

@@ -80,8 +80,24 @@ class VisionBrain:
         OpenCV red-disk detection (free, unlimited) so the robot can always see the circle."""
         er = self._look_er(rgb) if self.er_available else None
         if er is not None:
-            return er
+            return self._refine_with_local(er, rgb)
         return self._look_local(rgb)
+
+    def _refine_with_local(self, er: dict, rgb: np.ndarray) -> dict:
+        """Keep ER's caption/labels but use the LOCAL detector's pixel-accurate geometry
+        (cx, by base-pixel, size) for color-matched objects. ER's coarse cy/size (and missing
+        'by') put ground-projected positions ~1-2m off; local CV is exact and free."""
+        loc = self._look_local(rgb)
+        by_color = {o["color"]: o for o in loc.get("objects", [])}
+        for o in er.get("objects", []) or []:
+            color = next((c for c in COLOR_RANGES if c in str(o.get("label", "")).lower()), None)
+            m = by_color.get(color)
+            if m:
+                o["cx"], o["cy"], o["by"], o["size"] = m["cx"], m["cy"], m["by"], m["size"]
+        if loc["red_disk"]["visible"]:
+            er["red_disk"] = loc["red_disk"]
+            er["red_disk"]["by"] = by_color.get("red", {}).get("by", loc["red_disk"]["cy"])
+        return er
 
     def quick_look(self, rgb: np.ndarray) -> dict:
         """Free, unlimited LOCAL caption (no API call) for the live HUD — keeps the SEES text
@@ -138,7 +154,9 @@ class VisionBrain:
             x, y, bw, bh = cv2.boundingRect(c)
             cx = ((x + bw / 2) / w) * 2 - 1
             cy = ((y + bh / 2) / h) * 2 - 1
-            by = ((y + bh) / h) * 2 - 1     # bottom of bbox = where the object meets the floor
+            # Floor-contact pixel for ground projection: tall props meet the floor at the bbox
+            # BOTTOM; the red disk lies FLAT on the floor, so its CENTER pixel is the disk center.
+            by = cy if color == "red" else ((y + bh) / h) * 2 - 1
             size = float(bw / w)
             shape = self._guess_shape(color, bw, bh)
             objects.append({"label": f"{color} {shape}", "color": color, "cx": float(cx),

@@ -350,7 +350,9 @@ class Executor:
 
 def build(width: int = 1280, height: int = 720):
     bus = Bus()
-    c = GMTController(motion="basic_walk.pkl", scene=str(STAGE_SCENE))
+    # Boot standing still (not walking); the walk clip is only tracked when a nav goal starts.
+    c = GMTController(motion=skill_motion("stand"), scene=str(STAGE_SCENE))
+    c.fwd_scale = 0.0
     percept = Perception(c, bus, camera="chase", width=width, height=height)
     brain = Brain()
     vision = VisionBrain()
