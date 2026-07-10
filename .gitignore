@@ -10,6 +10,10 @@ __pycache__/
 output/
 runs/
 *.log
+MUJOCO_LOG.TXT
+embodied/_crash.log
+embodied/_gate*.png
+embodied/controller/gmt/motions/_synth/
 
 # Secrets
 .env
